@@ -196,3 +196,31 @@ Stage Summary:
 - Session tokens created using HMAC-SHA256 (no external JWT dependency)
 - Google OAuth ready (needs GOOGLE_CLIENT_ID/SECRET from user)
 - Security: passwordHash stripped from all API responses
+
+---
+Task ID: admin-system
+Agent: Main Agent
+Task: Add admin user, forgot password with mobile OTP, secure admin panel
+
+Work Log:
+- Added PasswordResetOTP model to Prisma schema
+- Created /lib/otp-utils.ts with OTP generation, rate-limiting, Neon HTTP storage
+- Created /api/cnx-admin-forgot-password route (send_otp, verify_otp, reset_password)
+- Redesigned AdminLogin.tsx with 3-step forgot password flow (email → OTP → reset)
+- Created /api/cnx-admin-init endpoint to create tables and seed admin user
+- Discovered Neon DB connection issue: Prisma TCP fails on Vercel serverless
+- Solution: Switched to @neondatabase/serverless HTTP driver (getNeonSql())
+- Updated admin auth, forgot password, and init routes to use Neon HTTP
+- Successfully seeded admin user: disciplineembrace@gmail.com / @deval1808 / phone: 9974331007
+- Created PasswordResetOTP table via raw SQL
+- Tested and verified: admin login works, forgot password OTP sends successfully
+- Removed debug endpoint for production security
+
+Stage Summary:
+- Admin panel fully functional at /cnx-admin-panel
+- Admin credentials: disciplineembrace@gmail.com / @deval1808
+- Phone: 9974331007 (for OTP password recovery)
+- Forgot Password: 3-step flow with mobile OTP verification
+- OTP Security: 5-min expiry, 1-min cooldown, 5/hr limit, 3 verify attempts
+- Rate Limiting: 15-min lockout after 5 failed login attempts
+- Database: Neon PostgreSQL connected via HTTP driver for serverless reliability
