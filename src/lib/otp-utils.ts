@@ -22,6 +22,7 @@ const OTP_RATE_LIMIT_WINDOW = 60 * 1000        // 1 minute between OTPs
 const OTP_MAX_REQUESTS_PER_HOUR = 5
 const OTP_MAX_VERIFY_ATTEMPTS = 3
 const SMS_TIMEOUT_MS = 15_000                    // 15 second timeout per SMS attempt
+const OTP_DEV_MODE = () => process.env.OTP_DEV_MODE === 'true' // Skip SMS, return OTP in response
 
 // SMS Provider env keys
 const FAST2SMS_API_KEY  = () => process.env.FAST2SMS_API_KEY
@@ -406,10 +407,51 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
       console.warn(`[Fast2SMS] Transactional route error: ${errMsg}`)
     }
 
-    // ─── Attempt 4: DLT Route (if template configured) ───
+    // ─── Attempt 4: V1 Promotional Route (legacy API — may work without ₹100) ───
+    // The V1 bulk API uses a different backend and sometimes works for accounts
+    // that haven't completed the ₹100 minimum transaction yet.
+    console.log(`[Fast2SMS] Attempt 4: V1 Promotional route for ${maskedPhone}`)
+
+    try {
+      const v1Response = await fetchWithTimeout('https://www.fast2sms.com/dev/bulk', {
+        method: 'POST',
+        headers: {
+          'authorization': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender_id: 'FSTSMS',
+          message: otpMessage,
+          language: 'english',
+          route: 'p',
+          numbers: normalizedPhone,
+        }),
+      }, SMS_TIMEOUT_MS)
+
+      const v1Data = await v1Response.json()
+
+      if (v1Data.return === true) {
+        console.log(`[Fast2SMS] V1 Promotional route SUCCESS for ${maskedPhone}`)
+        return {
+          success: true,
+          message: 'OTP sent successfully via Fast2SMS (V1)',
+          provider: 'Fast2SMS',
+          deliveryId: v1Data.request_id || undefined,
+        }
+      }
+
+      routeErrors.push({ route: 'v1_promo', statusCode: v1Data.status_code, message: v1Data.message })
+      console.warn(`[Fast2SMS] V1 Promotional route failed (${v1Data.status_code}): ${v1Data.message}`)
+    } catch (e: any) {
+      const errMsg = e.name === 'AbortError' ? 'Request timed out' : e.message
+      routeErrors.push({ route: 'v1_promo', statusCode: 0, message: errMsg })
+      console.warn(`[Fast2SMS] V1 Promotional route error: ${errMsg}`)
+    }
+
+    // ─── Attempt 5: DLT Route (if template configured) ───
     const dltTemplateId = FAST2SMS_DLT_TEMPLATE_ID()
     if (dltTemplateId) {
-      console.log(`[Fast2SMS] Attempt 4: DLT route with template ${dltTemplateId}`)
+      console.log(`[Fast2SMS] Attempt 5: DLT route with template ${dltTemplateId}`)
 
       try {
         const dltResponse = await fetchWithTimeout('https://www.fast2sms.com/dev/bulkV2', {
@@ -607,6 +649,20 @@ export async function sendOTPSMS(phone: string, otp: string): Promise<SMSResult>
 
   console.log(`[OTP] Sending OTP to ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)}`)
   console.log(`[OTP] Configured providers: ${getConfiguredProviders().join(', ')}`)
+  console.log(`[OTP] Dev mode: ${OTP_DEV_MODE()}`)
+
+  // ─── Dev Mode: Skip SMS delivery, return success with OTP ───
+  // Set OTP_DEV_MODE=true in environment to test OTP flows without real SMS
+  if (OTP_DEV_MODE()) {
+    const maskedPhone = `${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)}`
+    console.log(`[OTP] DEV MODE: OTP ${otp} for ${maskedPhone} (SMS skipped)`)
+    return {
+      success: true,
+      message: `OTP sent (dev mode): ${otp}`,
+      provider: 'dev_mode',
+      deliveryId: `dev_${Date.now()}`,
+    }
+  }
 
   // ─── Try Fast2SMS (Primary) ───
   if (FAST2SMS_API_KEY()) {
