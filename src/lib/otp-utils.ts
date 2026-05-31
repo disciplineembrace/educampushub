@@ -183,18 +183,33 @@ interface EmailOTPParams {
 }
 
 export async function sendOTPEmailViaBrevo(params: EmailOTPParams): Promise<SMSResult> {
-  const result = await sendOTPEmail({
-    to: params.email,
-    otp: params.otp,
-    purpose: params.purpose,
-    userName: params.userName,
-    expiryMinutes: OTP_EXPIRY_MINUTES,
-  })
+  console.log(`[OTP-DEBUG] sendOTPEmailViaBrevo called: email=${params.email}, purpose=${params.purpose}`)
+  console.log(`[OTP-DEBUG] BREVO_API_KEY exists: ${!!process.env.BREVO_API_KEY}, length: ${process.env.BREVO_API_KEY?.length || 0}`)
+  console.log(`[OTP-DEBUG] BREVO_API_KEY prefix: ${process.env.BREVO_API_KEY?.substring(0, 15) || 'none'}`)
 
-  return {
-    success: result.success,
-    message: result.message,
-    provider: result.provider || 'Brevo',
+  try {
+    const result = await sendOTPEmail({
+      to: params.email,
+      otp: params.otp,
+      purpose: params.purpose,
+      userName: params.userName,
+      expiryMinutes: OTP_EXPIRY_MINUTES,
+    })
+
+    console.log(`[OTP-DEBUG] sendOTPEmail result: success=${result.success}, provider=${result.provider}, message=${result.message}`)
+
+    return {
+      success: result.success,
+      message: result.message,
+      provider: result.provider || 'Brevo',
+    }
+  } catch (error) {
+    console.error(`[OTP-DEBUG] sendOTPEmailViaBrevo error:`, error)
+    return {
+      success: false,
+      message: `Email error: ${(error as Error).message}`,
+      provider: 'Brevo',
+    }
   }
 }
 
