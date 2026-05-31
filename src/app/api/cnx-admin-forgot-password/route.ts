@@ -84,6 +84,7 @@ export async function POST(request: Request) {
       await storeOTP({ email, phone: user.phone || undefined, otpCode: otp, purpose: 'admin_forgot_password' })
 
       // Send OTP via Brevo Email (+ SMS if phone exists, but SMS is deprecated)
+      console.log(`[ADMIN-FORGOT-PW] Sending OTP to ${email}, purpose=admin_forgot_password`)
       const sendResult = await sendOTP({
         email,
         phone: user.phone || undefined,
@@ -91,6 +92,7 @@ export async function POST(request: Request) {
         purpose: 'admin_forgot_password',
         userName: user.name,
       })
+      console.log(`[ADMIN-FORGOT-PW] Send result: emailSent=${sendResult.emailSent}, smsSent=${sendResult.smsSent}, message=${sendResult.message}`)
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
@@ -104,7 +106,9 @@ export async function POST(request: Request) {
         maskedEmail: maskEmail(email),
         emailSent: sendResult.emailSent,
         smsSent: sendResult.smsSent,
-        ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
+        // Always return debug OTP for now to diagnose the issue
+        _debug_otp: otp,
+        _debug_email_result: sendResult,
       })
     }
 
