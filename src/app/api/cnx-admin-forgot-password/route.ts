@@ -5,12 +5,12 @@ import {
   generateOTP,
   storeOTP,
   verifyOTP,
-  sendOTPSMS,
+  sendOTP,
   getAdminPhone,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
-  isSmsProviderConfigured,
-  getConfiguredProviders,
+  maskEmail,
+  maskPhone,
 } from '@/lib/otp-utils'
 
 // ─── Rate Limiting for forgot-password endpoint ───
@@ -23,7 +23,7 @@ const FORGOT_LOCKOUT_MS = 15 * 60 * 1000
  * POST /api/cnx-admin-forgot-password
  * 
  * Actions:
- * 1. send_otp     — Verify admin email, generate OTP, send to registered phone
+ * 1. send_otp     — Verify admin email, generate OTP, send via Brevo email
  * 2. verify_otp   — Verify the OTP code
  * 3. reset_password — Reset password after OTP is verified
  */
@@ -57,14 +57,14 @@ export async function POST(request: Request) {
       }
 
       // Verify admin exists (using Neon HTTP)
-      const users = await sql`SELECT id, "isAdmin", "isBanned", phone FROM "User" WHERE email = ${email} LIMIT 1`
+      const users = await sql`SELECT id, name, "isAdmin", "isBanned", phone FROM "User" WHERE email = ${email} LIMIT 1`
       const user = users?.[0]
       
       if (!user || !user.isAdmin) {
         const current = forgotPasswordAttempts.get(ip) || { count: 0, lastAttempt: 0 }
         forgotPasswordAttempts.set(ip, { count: current.count + 1, lastAttempt: now })
         return NextResponse.json(
-          { error: 'If this email belongs to an admin account, an OTP will be sent to the registered phone number.' },
+          { error: 'If this email belongs to an admin account, an OTP will be sent to the registered email.' },
           { status: 200 }
         )
       }
@@ -73,56 +73,37 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Account is banned. Contact support.' }, { status: 403 })
       }
 
-      // Get admin's registered phone
-      const phone = user.phone
-      if (!phone) {
-        return NextResponse.json(
-          { error: 'No phone number registered with this admin account. Contact super admin.' },
-          { status: 400 }
-        )
-      }
-
-      // Check OTP rate limit
-      const rateLimit = checkOTPRateLimit(phone)
+      // Check OTP rate limit (using email as identifier now)
+      const rateLimit = checkOTPRateLimit(email)
       if (!rateLimit.allowed) {
         return NextResponse.json({ error: rateLimit.reason, retryAfterMs: rateLimit.retryAfterMs }, { status: 429 })
       }
 
       // Generate and store OTP
       const otp = generateOTP()
-      await storeOTP(email, phone, otp)
+      await storeOTP({ email, phone: user.phone || undefined, otpCode: otp, purpose: 'admin_forgot_password' })
 
-      // Send OTP via SMS (multi-provider with fallback)
-      const smsResult = await sendOTPSMS(phone, otp)
+      // Send OTP via Brevo Email (+ SMS if phone exists, but SMS is deprecated)
+      const sendResult = await sendOTP({
+        email,
+        phone: user.phone || undefined,
+        otp,
+        purpose: 'admin_forgot_password',
+        userName: user.name,
+      })
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
 
-      // Mask phone for response
-      const maskedPhone = phone.slice(0, 2) + '****' + phone.slice(-2)
-
-      // If SMS completely failed (invalid phone), return error
-      if (!smsResult.success) {
-        console.error(`[Admin Forgot Password] SMS delivery failed for ${email}: ${smsResult.error}`)
-        return NextResponse.json({
-          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}`,
-          smsError: true,
-          needsAccountSetup: smsResult.needsAccountSetup || false,
-          setupInstructions: smsResult.setupInstructions || '',
-        }, { status: 503 })
-      }
-
-      // Warn if using console_log (no real SMS provider)
-      const isConsoleFallback = smsResult.provider === 'console_log'
+      const maskedPhone = user.phone ? maskPhone(user.phone) : null
 
       return NextResponse.json({
         success: true,
-        message: isConsoleFallback
-          ? 'OTP generated but no SMS provider configured. Contact admin.'
-          : `OTP sent to ${maskedPhone}`,
+        message: sendResult.message,
         maskedPhone,
-        provider: smsResult.provider,
-        ...(isConsoleFallback && { warning: 'OTP was not actually delivered via SMS. Configure MSG91 or Fast2SMS.' }),
+        maskedEmail: maskEmail(email),
+        emailSent: sendResult.emailSent,
+        smsSent: sendResult.smsSent,
         ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }
@@ -135,7 +116,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Email and OTP are required' }, { status: 400 })
       }
 
-      const result = await verifyOTP(email, otp)
+      const result = await verifyOTP(email, otp, 'admin_forgot_password')
 
       if (!result.valid) {
         return NextResponse.json({ error: result.reason }, { status: 400 })
@@ -208,7 +189,7 @@ export async function POST(request: Request) {
       await sql`
         INSERT INTO "AuditLog" (id, "actorId", action, "targetType", "targetId", details, "ipAddress", "createdAt")
         VALUES (gen_random_uuid(), ${adminUser.id}, 'password_reset_otp', 'user', ${adminUser.id}, 
-        ${JSON.stringify({ method: 'mobile_otp', phone: otpRecord.phone })}, ${ip}, CURRENT_TIMESTAMP)
+        ${JSON.stringify({ method: 'email_otp', email })}, ${ip}, CURRENT_TIMESTAMP)
       `
 
       return NextResponse.json({

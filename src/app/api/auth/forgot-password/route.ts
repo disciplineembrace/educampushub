@@ -5,11 +5,11 @@ import {
   generateOTP,
   storeOTP,
   verifyOTP,
-  sendOTPSMS,
+  sendOTP,
   getUserByPhone,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
-  isSmsProviderConfigured,
+  maskEmail,
 } from '@/lib/otp-utils'
 
 // ─── Rate Limiting for forgot-password endpoint ───
@@ -88,40 +88,30 @@ export async function POST(request: Request) {
 
       // Generate and store OTP
       const otp = generateOTP()
-      await storeOTP(user.email, normalizedPhone, otp)
+      await storeOTP({ email: user.email, phone: normalizedPhone, otpCode: otp, purpose: 'forgot_password' })
 
-      // Send OTP via SMS (multi-provider with fallback)
-      const smsResult = await sendOTPSMS(normalizedPhone, otp)
+      // Send OTP via email (Brevo)
+      const sendResult = await sendOTP({ email: user.email, phone: normalizedPhone, otp, purpose: 'forgot_password', userName: user.name })
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
 
-      // Mask phone for response
-      const maskedPhone = normalizedPhone.slice(0, 2) + '****' + normalizedPhone.slice(-2)
+      // Mask email for response
+      const maskedEmailAddress = maskEmail(user.email)
 
-      // If SMS completely failed (invalid phone), return error
-      if (!smsResult.success) {
-        console.error(`[Forgot Password] SMS delivery failed for ${normalizedPhone}: ${smsResult.error}`)
+      // If email delivery failed, return error
+      if (!sendResult.emailSent) {
+        console.error(`[Forgot Password] Email delivery failed for ${user.email}: ${sendResult.message}`)
         return NextResponse.json({
-          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}`,
-          smsError: true,
-          needsAccountSetup: smsResult.needsAccountSetup || false,
-          setupInstructions: smsResult.setupInstructions || '',
+          error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
+          emailError: true,
         }, { status: 503 })
       }
 
-      // Warn if using console_log (no real SMS provider)
-      const isConsoleFallback = smsResult.provider === 'console_log'
-
       return NextResponse.json({
         success: true,
-        message: isConsoleFallback
-          ? 'OTP generated but no SMS provider configured. Contact support.'
-          : `OTP sent to ${maskedPhone}`,
-        maskedPhone,
-        email: user.email,
-        provider: smsResult.provider,
-        ...(isConsoleFallback && { warning: 'OTP was not actually delivered via SMS. Configure MSG91 or Fast2SMS.' }),
+        message: `OTP sent to ${maskedEmailAddress}`,
+        maskedEmail: maskedEmailAddress,
         ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }
@@ -143,7 +133,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
       }
 
-      const result = await verifyOTP(user.email, otp)
+      const result = await verifyOTP(user.email, otp, 'forgot_password')
 
       if (!result.valid) {
         return NextResponse.json({ error: result.reason }, { status: 400 })

@@ -7,10 +7,10 @@ import {
   generateOTP,
   storeOTP,
   verifyOTP,
-  sendOTPSMS,
+  sendOTP,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
-  isSmsProviderConfigured,
+  maskEmail,
 } from '@/lib/otp-utils'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'educampushub-insecure-dev-secret-change-me'
@@ -234,48 +234,37 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'This account has been banned' }, { status: 403 })
       }
 
-      // Check SMS provider
-      if (!isSmsProviderConfigured()) {
-        return NextResponse.json({
-          error: 'SMS service is currently unavailable. Please try again later or contact support.',
-          smsError: true,
-        }, { status: 503 })
-      }
-
       // Check OTP rate limit
-      const rateLimit = checkOTPRateLimit(normalizedPhone)
+      const rateLimit = checkOTPRateLimit(user.email)
       if (!rateLimit.allowed) {
         return NextResponse.json({ error: rateLimit.reason, retryAfterMs: rateLimit.retryAfterMs }, { status: 429 })
       }
 
       // Generate and store OTP
       const otp = generateOTP()
-      await storeOTP(user.email, normalizedPhone, otp)
+      await storeOTP({ email: user.email, phone: normalizedPhone, otpCode: otp, purpose: 'login' })
 
-      // Send OTP via SMS
-      const smsResult = await sendOTPSMS(normalizedPhone, otp)
+      // Send OTP via email (Brevo)
+      const sendResult = await sendOTP({ email: user.email, phone: normalizedPhone, otp, purpose: 'login', userName: user.name })
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
 
-      // Mask phone for response
-      const maskedPhone = normalizedPhone.slice(0, 2) + '****' + normalizedPhone.slice(-2)
+      // Mask email for response
+      const maskedEmailAddress = maskEmail(user.email)
 
-      if (!smsResult.success) {
-        console.error(`[Login OTP] SMS delivery failed for ${normalizedPhone}: ${smsResult.error}`)
+      if (!sendResult.emailSent) {
+        console.error(`[Login OTP] Email delivery failed for ${user.email}: ${sendResult.message}`)
         return NextResponse.json({
-          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}`,
-          smsError: true,
-          needsAccountSetup: smsResult.needsAccountSetup || false,
-          setupInstructions: smsResult.setupInstructions || '',
+          error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
+          emailError: true,
         }, { status: 503 })
       }
 
       return NextResponse.json({
         success: true,
-        message: `OTP sent to ${maskedPhone}`,
-        maskedPhone,
-        email: user.email,
+        message: `OTP sent to ${maskedEmailAddress}`,
+        maskedEmail: maskedEmailAddress,
         ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }
@@ -298,7 +287,7 @@ export async function POST(request: Request) {
       }
 
       // Verify OTP using user's email
-      const result = await verifyOTP(user.email, otp)
+      const result = await verifyOTP(user.email, otp, 'login')
 
       if (!result.valid) {
         return NextResponse.json({ error: result.reason || 'Invalid or expired OTP' }, { status: 400 })
@@ -356,16 +345,8 @@ export async function POST(request: Request) {
         }
       }
 
-      // Check SMS provider
-      if (!isSmsProviderConfigured()) {
-        return NextResponse.json({
-          error: 'SMS service is currently unavailable. Please try again later or contact support.',
-          smsError: true,
-        }, { status: 503 })
-      }
-
       // Check OTP rate limit
-      const regRateLimit = checkOTPRateLimit(normalizedPhone)
+      const regRateLimit = checkOTPRateLimit(regEmail || normalizedPhone)
       if (!regRateLimit.allowed) {
         return NextResponse.json({ error: regRateLimit.reason, retryAfterMs: regRateLimit.retryAfterMs }, { status: 429 })
       }
@@ -373,33 +354,36 @@ export async function POST(request: Request) {
       // Generate and store OTP (use a temporary email placeholder)
       const tempEmail = regEmail || `phone_${normalizedPhone}@temp.registration`
       const otp = generateOTP()
-      await storeOTP(tempEmail, normalizedPhone, otp)
+      await storeOTP({ email: tempEmail, phone: normalizedPhone, otpCode: otp, purpose: 'register' })
 
-      // Send OTP via SMS
-      const smsResult = await sendOTPSMS(normalizedPhone, otp)
+      // Send OTP via email (Brevo) — only if a real email was provided
+      if (regEmail) {
+        const sendResult = await sendOTP({ email: regEmail, phone: normalizedPhone, otp, purpose: 'register' })
+        cleanupExpiredOTPs().catch(() => {})
 
-      // Cleanup expired OTPs
-      cleanupExpiredOTPs().catch(() => {})
+        const maskedEmailAddress = maskEmail(regEmail)
 
-      // Mask phone for response
-      const maskedPhone = normalizedPhone.slice(0, 2) + '****' + normalizedPhone.slice(-2)
+        if (!sendResult.emailSent) {
+          console.error(`[Registration] Email delivery failed for ${regEmail}: ${sendResult.message}`)
+          return NextResponse.json({
+            error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
+            emailError: true,
+          }, { status: 503 })
+        }
 
-      if (!smsResult.success) {
-        console.error(`[Registration] SMS delivery failed for ${normalizedPhone}: ${smsResult.error}`)
         return NextResponse.json({
-          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}`,
-          smsError: true,
-          needsAccountSetup: smsResult.needsAccountSetup || false,
-          setupInstructions: smsResult.setupInstructions || '',
-        }, { status: 503 })
+          success: true,
+          message: `OTP sent to ${maskedEmailAddress}`,
+          maskedEmail: maskedEmailAddress,
+          ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
+        })
       }
 
+      // No real email provided — cannot send OTP via email
+      cleanupExpiredOTPs().catch(() => {})
       return NextResponse.json({
-        success: true,
-        message: `OTP sent to ${maskedPhone}`,
-        maskedPhone,
-        ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
-      })
+        error: 'Email is required for OTP verification. Please provide your email address.',
+      }, { status: 400 })
     }
 
     // ─── VERIFY REGISTRATION OTP ───────────────────────────────
@@ -417,7 +401,7 @@ export async function POST(request: Request) {
       const tempEmail = `phone_${normalizedPhone}@temp.registration`
 
       // Try with temp email first, then try to find by phone directly
-      let result = await verifyOTP(tempEmail, otp)
+      let result = await verifyOTP(tempEmail, otp, 'register')
 
       // If not found with temp email, try finding OTP by phone in DB
       if (!result.valid) {
@@ -428,7 +412,7 @@ export async function POST(request: Request) {
           ORDER BY "createdAt" DESC LIMIT 1
         `
         if (otpRecords?.[0]) {
-          result = await verifyOTP(otpRecords[0].email, otp)
+          result = await verifyOTP(otpRecords[0].email, otp, 'register')
         }
       }
 

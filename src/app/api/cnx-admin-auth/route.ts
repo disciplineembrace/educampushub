@@ -5,13 +5,12 @@ import {
   generateOTP,
   storeOTP,
   verifyOTP,
-  sendOTPSMS,
+  sendOTP,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
   checkOTPVerifyAttempts,
   incrementVerifyAttempt,
-  isSmsProviderConfigured,
-  getConfiguredProviders,
+  maskEmail,
 } from '@/lib/otp-utils'
 
 // Rate limiting in-memory (production would use Redis)
@@ -86,7 +85,7 @@ export async function POST(request: Request) {
       }
 
       const user = await findAdminUser(email)
-      if (!user || !user.isAdmin || !user.phone) {
+      if (!user || !user.isAdmin) {
         return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
       }
 
@@ -100,32 +99,30 @@ export async function POST(request: Request) {
       }
 
       // Check rate limit
-      const rateLimit = checkOTPRateLimit(user.phone)
+      const rateLimit = checkOTPRateLimit(email)
       if (!rateLimit.allowed) {
         return NextResponse.json({ error: rateLimit.reason, retryAfterMs: rateLimit.retryAfterMs }, { status: 429 })
       }
 
       // Generate and store OTP
       const otp = generateOTP()
-      await storeOTP(email, user.phone, otp)
+      await storeOTP({ email, phone: user.phone || undefined, otpCode: otp, purpose: 'login' })
 
-      // Send OTP via SMS (multi-provider with fallback)
-      const smsResult = await sendOTPSMS(user.phone, otp)
+      // Send OTP via email (Brevo)
+      const sendResult = await sendOTP({ email, phone: user.phone || undefined, otp, purpose: 'login', userName: user.name })
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
 
-      // Mask phone for response
-      const maskedPhone = user.phone.slice(0, 2) + '****' + user.phone.slice(-2)
+      // Mask email for response
+      const maskedEmailAddress = maskEmail(email)
 
-      // If SMS completely failed (invalid phone), return error
-      if (!smsResult.success) {
-        console.error(`[2FA] SMS delivery failed for ${email}: ${smsResult.error}`)
+      // If email delivery failed, return error
+      if (!sendResult.emailSent) {
+        console.error(`[2FA] Email delivery failed for ${email}: ${sendResult.message}`)
         return NextResponse.json({
-          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}`,
-          smsError: true,
-          needsAccountSetup: smsResult.needsAccountSetup || false,
-          setupInstructions: smsResult.setupInstructions || '',
+          error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
+          emailError: true,
         }, { status: 503 })
       }
 
@@ -135,21 +132,14 @@ export async function POST(request: Request) {
       await sql`
         INSERT INTO "AuditLog" (id, "actorId", action, "targetType", "targetId", details, "ipAddress", "createdAt")
         VALUES (gen_random_uuid(), ${user.id}, '2fa_otp_sent', 'user', ${user.id},
-        ${JSON.stringify({ maskedPhone, provider: smsResult.provider, deliveryId: smsResult.deliveryId })}, ${ip}, CURRENT_TIMESTAMP)
+        ${JSON.stringify({ maskedEmail: maskedEmailAddress, method: 'email_otp' })}, ${ip}, CURRENT_TIMESTAMP)
       `
-
-      // Warn if using console_log (no real SMS provider)
-      const isConsoleFallback = smsResult.provider === 'console_log'
 
       return NextResponse.json({
         success: true,
-        message: isConsoleFallback
-          ? `OTP generated but no SMS provider configured. Contact admin.`
-          : `OTP sent to ${maskedPhone}`,
-        maskedPhone,
+        message: `OTP sent to ${maskedEmailAddress}`,
+        maskedEmail: maskedEmailAddress,
         requiresOTP: true,
-        provider: smsResult.provider,
-        ...(isConsoleFallback && { warning: 'OTP was not actually delivered via SMS. Configure MSG91 or Fast2SMS.' }),
         ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }
@@ -167,7 +157,7 @@ export async function POST(request: Request) {
       }
 
       // Verify OTP
-      const result = await verifyOTP(email, otpCode)
+      const result = await verifyOTP(email, otpCode, 'login')
       if (!result.valid) {
         // Track failed attempt
         const otpRecords = await getNeonSql()`

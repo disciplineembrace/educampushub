@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyBrevoConnection } from '@/lib/brevo-email'
 import {
-  isSmsProviderConfigured,
-  getConfiguredProviders,
-  sendOTPSMS,
   generateOTP,
   checkOTPRateLimit,
+  sendOTP,
+  maskEmail,
 } from '@/lib/otp-utils'
 
 /**
  * POST /api/cnx-admin/sms-diagnostic
  *
- * Admin-only endpoint to test SMS delivery and diagnose issues.
- * Requires: { testPhone: "9876543210" }
- * Optional: { dryRun: true } — only check config, don't send SMS
+ * Admin-only endpoint to test email OTP delivery and diagnose issues.
+ * Requires: { testEmail: "admin@example.com" }
+ * Optional: { dryRun: true } — only check config, don't send email
  *
- * This helps admins verify their Fast2SMS/MSG91 setup without
+ * This helps admins verify their Brevo email setup without
  * going through the full login/forgot-password flow.
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { testPhone, dryRun } = body
+    const { testEmail, dryRun } = body
 
     // Basic auth check — verify this is coming from admin panel
     const adminSession = request.cookies.get('cnx_admin_session')
@@ -28,22 +28,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized — admin access required' }, { status: 401 })
     }
 
-    // ─── Step 1: Check SMS Provider Configuration ───
-    const providers = getConfiguredProviders()
-    const isConfigured = isSmsProviderConfigured()
+    // ─── Step 1: Check Brevo Email Configuration ───
+    const brevoCheck = await verifyBrevoConnection()
 
     const config = {
-      providers,
-      isConfigured,
-      fast2sms: {
-        apiKeySet: !!(process.env.FAST2SMS_API_KEY),
-        apiKeyLength: process.env.FAST2SMS_API_KEY?.length || 0,
-        dltTemplateId: process.env.FAST2SMS_DLT_TEMPLATE_ID || '(not set)',
-        senderId: process.env.FAST2SMS_SENDER_ID || 'FSTSMS (default)',
-      },
-      msg91: {
-        authKeySet: !!(process.env.MSG91_AUTH_KEY),
-        templateId: process.env.MSG91_TEMPLATE_ID || '(not set)',
+      emailProvider: 'Brevo',
+      brevo: {
+        apiKeySet: !!(process.env.BREVO_API_KEY),
+        apiKeyLength: process.env.BREVO_API_KEY?.length || 0,
+        connectionValid: brevoCheck.valid,
+        connectionInfo: brevoCheck.info || '(unable to verify)',
       },
     }
 
@@ -51,32 +45,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         mode: 'dry_run',
         config,
-        message: isConfigured
-          ? 'SMS provider is configured. Use dryRun: false with a test phone number to test delivery.'
-          : 'No SMS provider is configured! Set FAST2SMS_API_KEY or MSG91_AUTH_KEY in environment variables.',
+        message: brevoCheck.valid
+          ? 'Brevo email provider is configured and connected. Use dryRun: false with a test email address to test delivery.'
+          : 'Brevo email provider is not properly configured! Set BREVO_API_KEY in environment variables.',
       })
     }
 
-    // ─── Step 2: Validate Test Phone Number ───
-    if (!testPhone || typeof testPhone !== 'string') {
+    // ─── Step 2: Validate Test Email ───
+    if (!testEmail || typeof testEmail !== 'string') {
       return NextResponse.json({
-        error: 'testPhone is required. Provide a 10-digit Indian mobile number.',
+        error: 'testEmail is required. Provide a valid email address.',
         config,
       }, { status: 400 })
     }
 
-    const cleaned = testPhone.replace(/\D/g, '')
-    const normalized = cleaned.length === 12 && cleaned.startsWith('91') ? cleaned.slice(2) : cleaned
-
-    if (!/^[6-9]\d{9}$/.test(normalized)) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(testEmail)) {
       return NextResponse.json({
-        error: `Invalid phone number: "${testPhone}". Must be a valid 10-digit Indian mobile number starting with 6-9.`,
+        error: `Invalid email address: "${testEmail}".`,
         config,
       }, { status: 400 })
     }
 
     // ─── Step 3: Check Rate Limit ───
-    const rateLimit = checkOTPRateLimit(normalized)
+    const rateLimit = checkOTPRateLimit(testEmail)
     if (!rateLimit.allowed) {
       return NextResponse.json({
         error: `Rate limit hit: ${rateLimit.reason}`,
@@ -85,41 +77,42 @@ export async function POST(request: NextRequest) {
       }, { status: 429 })
     }
 
-    // ─── Step 4: Send Test OTP ───
-    if (!isConfigured) {
+    // ─── Step 4: Send Test OTP via Email ───
+    if (!brevoCheck.valid) {
       return NextResponse.json({
         success: false,
         config,
-        message: 'No SMS provider configured. Cannot send test OTP.',
-        testPhone: normalized.slice(0, 2) + '****' + normalized.slice(-2),
+        message: 'Brevo email provider not configured. Cannot send test OTP.',
+        testEmail: maskEmail(testEmail),
       }, { status: 503 })
     }
 
     const testOtp = generateOTP()
-    const maskedPhone = normalized.slice(0, 2) + '****' + normalized.slice(-2)
+    const maskedTestEmail = maskEmail(testEmail)
 
-    console.log(`[SMS Diagnostic] Sending test OTP ${testOtp} to ${maskedPhone}`)
+    console.log(`[Email Diagnostic] Sending test OTP ${testOtp} to ${maskedTestEmail}`)
 
-    const smsResult = await sendOTPSMS(normalized, testOtp)
+    const sendResult = await sendOTP({
+      email: testEmail,
+      otp: testOtp,
+      purpose: 'login',
+      userName: 'Diagnostic Test',
+    })
 
     return NextResponse.json({
-      success: smsResult.success,
+      success: sendResult.emailSent,
       config,
-      testPhone: maskedPhone,
+      testEmail: maskedTestEmail,
       otp: testOtp, // Always show OTP in diagnostic mode for verification
       result: {
-        provider: smsResult.provider,
-        message: smsResult.message,
-        deliveryId: smsResult.deliveryId || null,
-        needsAccountSetup: smsResult.needsAccountSetup || false,
-        setupInstructions: smsResult.setupInstructions || null,
-        isConsoleFallback: smsResult.isConsoleFallback || false,
+        emailSent: sendResult.emailSent,
+        message: sendResult.message,
       },
-      error: smsResult.error || null,
+      error: sendResult.emailSent ? null : 'Email delivery failed',
     })
 
   } catch (error: any) {
-    console.error('[SMS Diagnostic] Error:', error)
+    console.error('[Email Diagnostic] Error:', error)
     return NextResponse.json({
       error: 'Diagnostic failed',
       details: error.message,
