@@ -64,6 +64,8 @@ interface UserItem {
   email: string
   college: string | null
   city: string | null
+  state?: string
+  district?: string
   phone?: string | null
   isVerified: boolean
   isBanned: boolean
@@ -73,8 +75,67 @@ interface UserItem {
   totalSales: number
   planType?: string
   premiumActive?: boolean
+  premiumExpiryDate?: string | null
+  premiumBooksUsed?: number
+  premiumBookLimit?: number
+  freeUploadUsed?: number
+  paidUploadCredits?: number
+  totalBooksUploaded?: number
+  whatsapp?: string | null
   createdAt: string
   _count: { listings: number }
+}
+
+interface UserDetailData extends UserItem {
+  listings: {
+    id: string
+    title: string
+    sellingPrice: number
+    isSold: boolean
+    isFeatured: boolean
+    isVerified: boolean
+    isUrgent: boolean
+    isDigital: boolean
+    uploadType: string
+    category: string
+    state: string
+    district: string
+    createdAt: string
+  }[]
+  payments: {
+    id: string
+    amount: number
+    paymentType: string
+    status: string
+    createdAt: string
+    verifiedAt: string | null
+  }[]
+  wishlistItems: { id: string; listingId: string; listing: { id: string; title: string; sellingPrice: number } }[]
+  reports: { id: string; reason: string; isResolved: boolean; createdAt: string; listing: { id: string; title: string } }[]
+  _count: { listings: number; wishlistItems: number; reports: number; payments: number; adminSessions: number; auditLogs: number }
+}
+
+interface DeleteSummary {
+  user: { id: string; name: string; email: string; college: string | null; phone: string | null; state: string; district: string; planType: string; premiumActive: boolean; isVerified: boolean; createdAt: string }
+  resources: {
+    listings: number
+    activeListings: number
+    soldListings: number
+    premiumListings: number
+    featuredListings: number
+    totalViews: number
+    totalSaves: number
+    totalSpentOnPlatform: number
+    payments: number
+    verifiedPayments: number
+    wishlistItems: number
+    reportsFiled: number
+    reportsOnListings: number
+    wishlistsOnListings: number
+    sessions: number
+    auditLogs: number
+  }
+  listingTitles: { id: string; title: string; price: number; category: string }[]
 }
 
 interface ListingItem {
@@ -175,6 +236,8 @@ interface UserEditForm {
   city: string
   phone: string
   isVerified: boolean
+  state: string
+  district: string
 }
 
 // ─── Role Badge ───────────────────────────────────────────────────
@@ -255,10 +318,15 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
 
   const [showUserModal, setShowUserModal] = useState(false)
   const [selectedUser, setSelectedUser] = useState<UserItem | null>(null)
+  const [userDetail, setUserDetail] = useState<UserDetailData | null>(null)
   const [userEditMode, setUserEditMode] = useState(false)
   const [userEditForm, setUserEditForm] = useState<UserEditForm | null>(null)
   const [userListings, setUserListings] = useState<ListingItem[]>([])
   const [userListingsLoading, setUserListingsLoading] = useState(false)
+  const [deleteSummary, setDeleteSummary] = useState<DeleteSummary | null>(null)
+  const [deleteSummaryLoading, setDeleteSummaryLoading] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deletingUser, setDeletingUser] = useState(false)
 
   // Fetch data from protected admin API
   const fetchData = useCallback(async () => {
@@ -453,6 +521,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
     setSelectedUser(user)
     setShowUserModal(true)
     setUserEditMode(false)
+    setUserDetail(null)
     setUserEditForm({
       name: user.name,
       email: user.email,
@@ -460,13 +529,35 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
       city: user.city || '',
       phone: user.phone || '',
       isVerified: user.isVerified,
+      state: user.state || '',
+      district: user.district || '',
     })
-    // Fetch user's listings
+    // Fetch user's detailed data
     setUserListingsLoading(true)
     try {
-      const res = await fetch(`/api/cnx-admin?type=user-listings&id=${user.id}`)
-      if (res.ok) {
-        const d = await res.json()
+      const [detailRes, listingsRes] = await Promise.all([
+        fetch(`/api/cnx-admin?type=user-detail&id=${user.id}`),
+        fetch(`/api/cnx-admin?type=user-listings&id=${user.id}`),
+      ])
+      if (detailRes.ok) {
+        const d = await detailRes.json()
+        setUserDetail(d.user)
+        // Also update edit form with detail data
+        if (d.user) {
+          setUserEditForm({
+            name: d.user.name,
+            email: d.user.email,
+            college: d.user.college || '',
+            city: d.user.city || '',
+            phone: d.user.phone || '',
+            isVerified: d.user.isVerified,
+            state: d.user.state || '',
+            district: d.user.district || '',
+          })
+        }
+      }
+      if (listingsRes.ok) {
+        const d = await listingsRes.json()
         setUserListings(d.listings || [])
       }
     } catch {
@@ -493,6 +584,59 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
     if (success) {
       setUserEditMode(false)
       refreshUserDetail(selectedUser.id)
+    }
+  }
+
+  // Fetch delete user summary before confirming deletion
+  const fetchDeleteSummary = async (userId: string) => {
+    setDeleteSummaryLoading(true)
+    setDeleteSummary(null)
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_user_summary', targetId: userId }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setDeleteSummary(data)
+        setShowDeleteConfirm(true)
+      } else {
+        const data = await res.json()
+        toast.error(data.error || 'Failed to load delete summary')
+      }
+    } catch {
+      toast.error('Failed to load delete summary')
+    } finally {
+      setDeleteSummaryLoading(false)
+    }
+  }
+
+  // Confirm and execute user deletion
+  const confirmDeleteUser = async (userId: string) => {
+    setDeletingUser(true)
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_user', targetId: userId }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('User account permanently deleted')
+        setShowDeleteConfirm(false)
+        setShowUserModal(false)
+        setSelectedUser(null)
+        setUserDetail(null)
+        setDeleteSummary(null)
+        fetchData()
+      } else {
+        toast.error(data.error || 'Delete failed')
+      }
+    } catch {
+      toast.error('Network error during deletion')
+    } finally {
+      setDeletingUser(false)
     }
   }
 
@@ -673,7 +817,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
                 <OverviewTab stats={stats} loading={loading} onAction={adminAction} onOpenListing={openListingModal} />
               )}
               {activeTab === 'users' && (
-                <UsersTab users={filteredUsers} loading={loading} onAction={adminAction} onOpenUser={openUserModal} adminId={admin.id} />
+                <UsersTab users={filteredUsers} loading={loading} onAction={adminAction} onOpenUser={openUserModal} adminId={admin.id} onDeleteUser={fetchDeleteSummary} deleteSummaryLoading={deleteSummaryLoading} />
               )}
               {activeTab === 'listings' && (
                 <ListingsTab listings={filteredListings} loading={loading} onAction={adminAction} onOpenListing={openListingModal} />
@@ -723,6 +867,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         {showUserModal && selectedUser && (
           <UserDetailModal
             user={selectedUser}
+            userDetail={userDetail}
             editMode={userEditMode}
             editForm={userEditForm}
             userListings={userListings}
@@ -732,9 +877,23 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
             onSave={saveUserEdits}
             onAction={adminAction}
             onOpenListing={openListingModal}
-            onClose={() => { setShowUserModal(false); setSelectedUser(null); setUserEditMode(false) }}
+            onDeleteUser={fetchDeleteSummary}
+            deleteSummaryLoading={deleteSummaryLoading}
+            onClose={() => { setShowUserModal(false); setSelectedUser(null); setUserDetail(null); setUserEditMode(false) }}
             onRefresh={() => refreshUserDetail(selectedUser.id)}
             adminId={admin.id}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Delete User Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteConfirm && deleteSummary && (
+          <DeleteUserConfirmModal
+            summary={deleteSummary}
+            deleting={deletingUser}
+            onConfirm={() => confirmDeleteUser(deleteSummary.user.id)}
+            onCancel={() => { setShowDeleteConfirm(false); setDeleteSummary(null) }}
           />
         )}
       </AnimatePresence>

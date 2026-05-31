@@ -65,6 +65,29 @@ export async function GET(request: Request) {
     return NextResponse.json({ listing })
   }
 
+  if (type === 'user-detail') {
+    const userId = searchParams.get('id')
+    if (!userId) return NextResponse.json({ error: 'Missing user id' }, { status: 400 })
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      include: {
+        listings: {
+          select: { id: true, title: true, sellingPrice: true, isSold: true, isFeatured: true, isVerified: true, isUrgent: true, isDigital: true, uploadType: true, category: true, state: true, district: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
+        payments: {
+          select: { id: true, amount: true, paymentType: true, status: true, createdAt: true, verifiedAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
+        wishlistItems: { select: { id: true, listingId: true, listing: { select: { id: true, title: true, sellingPrice: true } } } },
+        reports: { select: { id: true, reason: true, isResolved: true, createdAt: true, listing: { select: { id: true, title: true } } } },
+        _count: { select: { listings: true, wishlistItems: true, reports: true, payments: true, adminSessions: true, auditLogs: true } },
+      },
+    })
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    return NextResponse.json({ user })
+  }
+
   if (type === 'user-listings') {
     const userId = searchParams.get('id')
     if (!userId) return NextResponse.json({ error: 'Missing user id' }, { status: 400 })
@@ -206,6 +229,47 @@ export async function POST(request: Request) {
         await db.user.update({ where: { id: targetId }, data: cleanUserUpdates })
         await db.auditLog.create({ data: { actorId: admin.userId, action: 'edit_user', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify(cleanUserUpdates) } })
         return NextResponse.json({ success: true })
+      }
+      case 'delete_user_summary': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const summaryUser = await db.user.findUnique({
+          where: { id: targetId },
+          include: {
+            listings: { select: { id: true, title: true, sellingPrice: true, isSold: true, isFeatured: true, uploadType: true, category: true, images: true } },
+            payments: { select: { id: true, amount: true, paymentType: true, status: true } },
+            _count: { select: { listings: true, wishlistItems: true, reports: true, payments: true, adminSessions: true, auditLogs: true } },
+          },
+        })
+        if (!summaryUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        if (summaryUser.isAdmin) return NextResponse.json({ error: 'Cannot delete admin accounts' }, { status: 403 })
+        const totalViewsFromListings = await db.listing.aggregate({ _sum: { views: true }, where: { sellerId: targetId } })
+        const totalSavesFromListings = await db.listing.aggregate({ _sum: { saves: true }, where: { sellerId: targetId } })
+        const reportsOnUserListings = await db.report.count({ where: { listing: { sellerId: targetId } } })
+        const wishlistsOnUserListings = await db.wishlist.count({ where: { listing: { sellerId: targetId } } })
+        const verifiedPayments = summaryUser.payments.filter(p => p.status === 'verified')
+        const totalSpent = verifiedPayments.reduce((sum, p) => sum + p.amount, 0)
+        return NextResponse.json({
+          user: { id: summaryUser.id, name: summaryUser.name, email: summaryUser.email, college: summaryUser.college, phone: summaryUser.phone, state: summaryUser.state, district: summaryUser.district, planType: summaryUser.planType, premiumActive: summaryUser.premiumActive, isVerified: summaryUser.isVerified, createdAt: summaryUser.createdAt },
+          resources: {
+            listings: summaryUser._count.listings,
+            activeListings: summaryUser.listings.filter(l => !l.isSold).length,
+            soldListings: summaryUser.listings.filter(l => l.isSold).length,
+            premiumListings: summaryUser.listings.filter(l => l.uploadType === 'premium').length,
+            featuredListings: summaryUser.listings.filter(l => l.isFeatured).length,
+            totalViews: totalViewsFromListings._sum.views || 0,
+            totalSaves: totalSavesFromListings._sum.saves || 0,
+            totalSpentOnPlatform: totalSpent,
+            payments: summaryUser._count.payments,
+            verifiedPayments: verifiedPayments.length,
+            wishlistItems: summaryUser._count.wishlistItems,
+            reportsFiled: summaryUser._count.reports,
+            reportsOnListings: reportsOnUserListings,
+            wishlistsOnListings,
+            sessions: summaryUser._count.adminSessions,
+            auditLogs: summaryUser._count.auditLogs,
+          },
+          listingTitles: summaryUser.listings.slice(0, 10).map(l => ({ id: l.id, title: l.title, price: l.sellingPrice, category: l.category })),
+        })
       }
       case 'delete_user': {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
