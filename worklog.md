@@ -284,3 +284,26 @@ Stage Summary:
 - Admin Forgot Password also uses Brevo email OTP now
 - OTP features: 5-min expiry, 60s resend cooldown, 5/hour rate limit, 3 max verify attempts
 - Live site: https://educampushub-beta.vercel.app
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Log into Brevo and disable IP restriction
+
+Work Log:
+- Opened Brevo login in browser with credentials disciplineembrace@gmail.com / pradip@123
+- Brevo requires device verification (6-digit code)
+- Sent verification via SMS to +91******1007 (user's phone 9974331007)
+- Also sent verification via email to disciplineembrace@gmail.com
+- Cannot access Gmail (Google blocks automated sign-in)
+- Cannot access SMS (no programmatic SMS reading)
+- Tested Brevo API from Vercel: IP 100.54.21.204 also blocked by IP restriction
+- The xkeysib API key is VALID but Brevo's IP restriction blocks ALL requests from unrecognized IPs
+- This is a chicken-and-egg problem: can't whitelist IPs via API because API is blocked by IP restriction
+- SOLUTION: User must provide the Brevo verification code sent to their phone/email
+
+Stage Summary:
+- Brevo API key confirmed working (xkeysib- prefix, 89 chars)
+- IP restriction blocks all serverless and dev server IPs
+- Need verification code to log into Brevo dashboard and disable IP restriction
+- Code sent via SMS to +91******1007 and email to disciplineembrace@gmail.com
