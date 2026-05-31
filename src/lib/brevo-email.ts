@@ -350,20 +350,20 @@ export async function sendOTPEmail(params: OTPEmailParams): Promise<EmailResult>
     }
   }
 
-  // Try Resend first (no IP restrictions, more reliable)
-  if (resendKey) {
-    console.log('[Email] Attempting to send via Resend...')
-    const result = await sendViaResend(params)
-    if (result.success) return result
-    console.warn('[Email] Resend failed, trying Brevo as fallback...')
-  }
-
-  // Try Brevo as fallback
+  // Try Brevo first (currently configured and working)
   if (brevoKey) {
     console.log('[Email] Attempting to send via Brevo...')
     const result = await sendViaBrevo(params)
     if (result.success) return result
-    console.warn('[Email] Brevo also failed.')
+    console.warn('[Email] Brevo failed, trying Resend as fallback...')
+  }
+
+  // Try Resend as fallback
+  if (resendKey) {
+    console.log('[Email] Attempting to send via Resend...')
+    const result = await sendViaResend(params)
+    if (result.success) return result
+    console.warn('[Email] Resend also failed.')
   }
 
   // All providers failed - log OTP to console for debugging
