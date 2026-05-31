@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, Search, Sun, Moon, Menu, X, Heart, User, LogOut, ChevronDown, Home, Compass, PlusCircle, LayoutGrid, BookOpen, Brain } from 'lucide-react'
+import { Sparkles, Search, Sun, Moon, Menu, X, Heart, User, LogOut, ChevronDown, Home, Compass, PlusCircle, LayoutGrid, BookOpen, Brain, Crown } from 'lucide-react'
 import { useAppStore, type PageType } from '@/lib/store'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,7 @@ export default function Navbar() {
     { label: t('nav.item.reader'), page: 'reader', icon: BookOpen },
     { label: t('nav.item.dashboard'), page: 'dashboard', icon: Brain },
     { label: t('nav.item.sell'), page: 'sell', icon: PlusCircle },
+    { label: 'Pricing', page: 'pricing', icon: Crown },
   ]
 
   useEffect(() => {

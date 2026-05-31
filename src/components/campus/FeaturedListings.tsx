@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Heart, MapPin, Star, MessageCircle, BookOpen, BadgeCheck, Flame, Eye } from 'lucide-react'
+import { Heart, MapPin, Star, MessageCircle, BookOpen, BadgeCheck, Flame, Eye, Crown } from 'lucide-react'
 import { useAppStore, formatINR, CATEGORIES, parseListingImages } from '@/lib/store'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
 import { Badge } from '@/components/ui/badge'
@@ -49,7 +49,7 @@ function ListingCard({ listing, index }: { listing: Listing; index: number }) {
 
   return (
     <motion.div
-      className="group card-premium glow-hover overflow-hidden cursor-pointer"
+      className={`group overflow-hidden cursor-pointer ${listing.uploadType === 'premium' ? 'ring-2 ring-amber-400 dark:ring-amber-500 shadow-lg shadow-amber-500/10' : 'card-premium glow-hover'}`}
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
@@ -67,6 +67,11 @@ function ListingCard({ listing, index }: { listing: Listing; index: number }) {
 
         {/* Badges */}
         <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
+          {listing.uploadType === 'premium' && (
+            <Badge className="bg-amber-500 text-white border-0 text-[10px] px-2.5 py-0.5 rounded-full">
+              <Crown className="w-3 h-3 mr-0.5" /> Premium
+            </Badge>
+          )}
           {listing.isFeatured && (
             <Badge className="bg-amber-500 text-white border-0 text-[10px] px-2.5 py-0.5 rounded-full">
               <Star className="w-3 h-3 mr-0.5" /> {t('featured.badge.featured')}

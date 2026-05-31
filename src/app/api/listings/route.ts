@@ -62,10 +62,10 @@ export async function GET(request: Request) {
       ]
     }
 
-    let orderBy: Record<string, string> = { createdAt: 'desc' }
-    if (sortBy === 'price-low') orderBy = { sellingPrice: 'asc' }
-    else if (sortBy === 'price-high') orderBy = { sellingPrice: 'desc' }
-    else if (sortBy === 'popular') orderBy = { views: 'desc' }
+    let orderBy: Record<string, unknown>[] = [{ uploadType: 'desc' }, { createdAt: 'desc' }] // Premium first, then newest
+    if (sortBy === 'price-low') orderBy = [{ uploadType: 'desc' }, { sellingPrice: 'asc' }]
+    else if (sortBy === 'price-high') orderBy = [{ uploadType: 'desc' }, { sellingPrice: 'desc' }]
+    else if (sortBy === 'popular') orderBy = [{ uploadType: 'desc' }, { views: 'desc' }]
 
     const [listings, total] = await Promise.all([
       db.listing.findMany({
@@ -148,23 +148,37 @@ export async function POST(request: Request) {
 
     // Check upload credits
     const FREE_UPLOAD_LIMIT = 5
+    const PREMIUM_BOOK_LIMIT = 29
     const user = await db.user.findUnique({ where: { id: sellerId } })
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
+    // Check if premium is expired
+    let premiumActive = user.premiumActive
+    if (premiumActive && user.premiumExpiryDate && new Date(user.premiumExpiryDate) < new Date()) {
+      premiumActive = false
+    }
+
     const freeRemaining = Math.max(0, FREE_UPLOAD_LIMIT - user.freeUploadUsed)
-    const totalCredits = freeRemaining + user.paidUploadCredits
+    const premiumRemaining = premiumActive ? Math.max(0, (user.premiumBookLimit || PREMIUM_BOOK_LIMIT) - (user.premiumBooksUsed || 0)) : 0
+    const totalCredits = freeRemaining + user.paidUploadCredits + premiumRemaining
 
     if (totalCredits <= 0) {
       return NextResponse.json({ 
-        error: 'Upload limit reached. Please purchase upload credits to continue.', 
+        error: 'Upload limit reached. Please purchase upload credits or upgrade to Premium.', 
         code: 'UPLOAD_LIMIT_REACHED',
         freeUploadUsed: user.freeUploadUsed,
         freeUploadLimit: FREE_UPLOAD_LIMIT,
         paidUploadCredits: user.paidUploadCredits,
+        premiumActive,
+        premiumBooksUsed: user.premiumBooksUsed,
+        premiumBookLimit: user.premiumBookLimit || PREMIUM_BOOK_LIMIT,
       }, { status: 403 })
     }
+
+    // Determine upload type for this listing
+    const uploadType = premiumActive ? 'premium' : 'normal'
 
     // Use a transaction to create listing and decrement credits atomically
     const listing = await db.$transaction(async (tx) => {
@@ -191,12 +205,22 @@ export async function POST(request: Request) {
           images: imagesJson,
           isDigital: isDigital || false,
           fileUrl: fileUrl || null,
+          uploadType,
         },
         include: { seller: true }
       })
 
       // Deduct upload credit and update counters atomically
-      if (user.freeUploadUsed < FREE_UPLOAD_LIMIT) {
+      if (premiumActive) {
+        // Premium user: use premium book quota
+        await tx.user.update({ 
+          where: { id: sellerId }, 
+          data: { 
+            premiumBooksUsed: { increment: 1 },
+            totalBooksUploaded: { increment: 1 },
+          } 
+        })
+      } else if (user.freeUploadUsed < FREE_UPLOAD_LIMIT) {
         await tx.user.update({ 
           where: { id: sellerId }, 
           data: { 

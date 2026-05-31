@@ -15,6 +15,8 @@ model User {
   phone               String?
   college             String?
   city                String?
+  state               String          @default("")
+  district            String          @default("")
   avatar              String?
   isVerified          Boolean         @default(false)
   isAdmin             Boolean         @default(false)
@@ -25,9 +27,17 @@ model User {
   rating              Float           @default(0)
   totalSales          Int             @default(0)
   whatsapp            String?
+  // Upload credits
   freeUploadUsed      Int             @default(0)
   paidUploadCredits   Int             @default(0)
   totalBooksUploaded  Int             @default(0)
+  // Premium Plan
+  planType            String          @default("normal") // "normal" | "premium"
+  premiumActive       Boolean         @default(false)
+  premiumBooksUsed    Int             @default(0)
+  premiumBookLimit    Int             @default(29)
+  premiumExpiryDate   DateTime?
+  premiumPurchaseDate DateTime?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   listings            Listing[]
@@ -65,6 +75,7 @@ model Listing {
   isSold         Boolean    @default(false)
   isDigital      Boolean    @default(false)
   fileUrl        String?
+  uploadType     String     @default("normal") // "normal" | "premium"
   views          Int        @default(0)
   saves          Int        @default(0)
   sellerId       String
@@ -73,6 +84,8 @@ model Listing {
   reports        Report[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
+
+  @@index([uploadType])
 }
 
 model Wishlist {
@@ -134,6 +147,7 @@ model Payment {
   userId          String
   amount          Float    @default(10)
   paymentMethod   String   @default("upi_qr") // "upi_qr" | "razorpay"
+  paymentType     String   @default("upload_fee") // "upload_fee" | "premium_plan"
   utrNumber       String?  // UTR/reference number from user
   screenshotUrl   String?  // uploaded screenshot URL
   upiId           String?  // UPI ID used for payment
@@ -149,6 +163,14 @@ model Payment {
   @@index([status])
   @@index([utrNumber])
   @@index([expiresAt])
+  @@index([paymentType])
+}
+
+model SiteConfig {
+  id        String   @id @default("default")
+  upiId     String   @default("sagathiyapradip1137-3@oksbi")
+  upiName   String   @default("EduCampusHub")
+  updatedAt DateTime @updatedAt
 }
 
 model RateLimitEntry {

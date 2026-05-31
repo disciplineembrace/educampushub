@@ -258,9 +258,31 @@ export async function POST(request: Request) {
         const payment = await db.payment.findUnique({ where: { id: targetId } })
         if (!payment) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
         if (payment.status === 'verified') return NextResponse.json({ error: 'Already verified' }, { status: 400 })
+        
+        // Update payment status
         await db.payment.update({ where: { id: targetId }, data: { status: 'verified', verifiedAt: new Date() } })
-        await db.user.update({ where: { id: payment.userId }, data: { paidUploadCredits: { increment: payment.uploadCredit } } })
-        await db.auditLog.create({ data: { actorId: admin.userId, action: 'approve_payment', targetType: 'payment', targetId, ipAddress: ip, details: JSON.stringify({ amount: payment.amount, userId: payment.userId }) } })
+        
+        // Handle based on payment type
+        if (payment.paymentType === 'premium_plan') {
+          // Activate premium plan
+          const premiumExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+          await db.user.update({
+            where: { id: payment.userId },
+            data: {
+              planType: 'premium',
+              premiumActive: true,
+              premiumBookLimit: 29,
+              premiumBooksUsed: 0,
+              premiumExpiryDate: premiumExpiry,
+              premiumPurchaseDate: new Date(),
+            }
+          })
+          await db.auditLog.create({ data: { actorId: admin.userId, action: 'approve_premium', targetType: 'payment', targetId, ipAddress: ip, details: JSON.stringify({ amount: payment.amount, userId: payment.userId, plan: 'premium' }) } })
+        } else {
+          // Regular upload credit
+          await db.user.update({ where: { id: payment.userId }, data: { paidUploadCredits: { increment: payment.uploadCredit } } })
+          await db.auditLog.create({ data: { actorId: admin.userId, action: 'approve_payment', targetType: 'payment', targetId, ipAddress: ip, details: JSON.stringify({ amount: payment.amount, userId: payment.userId, credits: payment.uploadCredit }) } })
+        }
         return NextResponse.json({ success: true })
       }
       case 'reject_payment': {
@@ -275,6 +297,54 @@ export async function POST(request: Request) {
         await db.user.update({ where: { id: targetId }, data: { paidUploadCredits: { increment: credits } } })
         await db.auditLog.create({ data: { actorId: admin.userId, action: 'grant_credits', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify({ credits }) } })
         return NextResponse.json({ success: true })
+      }
+      case 'toggle_premium': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const targetUser = await db.user.findUnique({ where: { id: targetId } })
+        if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        const newPremium = !targetUser.premiumActive
+        const premiumExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        await db.user.update({
+          where: { id: targetId },
+          data: {
+            planType: newPremium ? 'premium' : 'normal',
+            premiumActive: newPremium,
+            premiumBookLimit: newPremium ? 29 : targetUser.premiumBookLimit,
+            premiumExpiryDate: newPremium ? premiumExpiry : null,
+            premiumPurchaseDate: newPremium ? new Date() : targetUser.premiumPurchaseDate,
+          }
+        })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: newPremium ? 'activate_premium' : 'deactivate_premium', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify({ name: targetUser.name, email: targetUser.email }) } })
+        return NextResponse.json({ success: true, premiumActive: newPremium })
+      }
+      case 'update_upi': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const newUpiId = details?.upiId
+        if (!newUpiId || typeof newUpiId !== 'string') return NextResponse.json({ error: 'UPI ID is required' }, { status: 400 })
+        await db.siteConfig.upsert({
+          where: { id: 'default' },
+          update: { upiId: newUpiId },
+          create: { id: 'default', upiId: newUpiId, upiName: 'EduCampusHub' }
+        })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'update_upi', targetType: 'config', targetId: 'default', ipAddress: ip, details: JSON.stringify({ upiId: newUpiId }) } })
+        return NextResponse.json({ success: true, upiId: newUpiId })
+      }
+      case 'revenue_analytics': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const [totalRevenue, uploadFeeRevenue, premiumRevenue, premiumUsers, pendingPayments] = await Promise.all([
+          db.payment.aggregate({ _sum: { amount: true }, where: { status: 'verified' } }),
+          db.payment.aggregate({ _sum: { amount: true }, where: { status: 'verified', paymentType: 'upload_fee' } }),
+          db.payment.aggregate({ _sum: { amount: true }, where: { status: 'verified', paymentType: 'premium_plan' } }),
+          db.user.count({ where: { premiumActive: true } }),
+          db.payment.count({ where: { status: { in: ['pending', 'pending_verification'] } } }),
+        ])
+        return NextResponse.json({
+          totalRevenue: totalRevenue._sum.amount || 0,
+          uploadFeeRevenue: uploadFeeRevenue._sum.amount || 0,
+          premiumRevenue: premiumRevenue._sum.amount || 0,
+          premiumUsers,
+          pendingPayments,
+        })
       }
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
