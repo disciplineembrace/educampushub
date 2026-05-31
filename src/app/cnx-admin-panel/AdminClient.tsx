@@ -30,6 +30,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { formatINR, CATEGORIES } from '@/lib/store'
+import { INDIAN_STATES, INDIAN_DISTRICTS } from '@/lib/indian-states-districts'
 import { toast } from 'sonner'
 import AdminLogin from './AdminLogin'
 
@@ -79,6 +80,8 @@ interface ListingItem {
   title: string
   description: string
   category: string
+  state: string
+  district: string
   city: string
   condition: string
   sellingPrice: number
@@ -151,6 +154,8 @@ interface ListingEditForm {
   originalPrice: number
   sellingPrice: number
   category: string
+  state: string
+  district: string
   city: string
   condition: string
   isFeatured: boolean
@@ -409,6 +414,8 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
           originalPrice: listing.originalPrice,
           sellingPrice: listing.sellingPrice,
           category: listing.category,
+          state: listing.state || '',
+          district: listing.district || '',
           city: listing.city,
           condition: listing.condition,
           isFeatured: listing.isFeatured,
@@ -899,12 +906,38 @@ function ListingDetailModal({
                 </Select>
               </div>
               <div>
-                <Label className="text-slate-400 text-xs mb-1 block">City</Label>
-                <Input
-                  value={editForm.city}
-                  onChange={e => onSetEditForm({ ...editForm, city: e.target.value })}
-                  className="bg-slate-800 border-slate-700 text-slate-200"
-                />
+                <Label className="text-slate-400 text-xs mb-1 block">State</Label>
+                <Select
+                  value={editForm.state || undefined}
+                  onValueChange={v => onSetEditForm({ ...editForm, state: v, district: '' })}
+                >
+                  <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 w-full">
+                    <SelectValue placeholder="Select state" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700 max-h-60">
+                    {INDIAN_STATES.map(s => (
+                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">District</Label>
+                <Select
+                  key={`admin-district-${editForm.state}`}
+                  value={editForm.district && (INDIAN_DISTRICTS[editForm.state] || []).includes(editForm.district) ? editForm.district : undefined}
+                  onValueChange={v => onSetEditForm({ ...editForm, district: v, city: v })}
+                  disabled={!editForm.state}
+                >
+                  <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 w-full">
+                    <SelectValue placeholder={editForm.state ? 'Select district' : 'Select state first'} />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700 max-h-60">
+                    {(INDIAN_DISTRICTS[editForm.state] || []).map(d => (
+                      <SelectItem key={d} value={d}>{d}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label className="text-slate-400 text-xs mb-1 block">Condition</Label>
@@ -962,8 +995,12 @@ function ListingDetailModal({
                 <p className="text-slate-200">{CATEGORIES.find(c => c.id === listing.category)?.name || listing.category}</p>
               </div>
               <div>
-                <p className="text-slate-500 text-xs mb-1">City</p>
-                <p className="text-slate-200">{listing.city}</p>
+                <p className="text-slate-500 text-xs mb-1">State</p>
+                <p className="text-slate-200">{listing.state || '—'}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">District</p>
+                <p className="text-slate-200">{listing.district || listing.city || '—'}</p>
               </div>
               <div>
                 <p className="text-slate-500 text-xs mb-1">Condition</p>
@@ -1699,7 +1736,7 @@ function ListingsTab({ listings, loading, onAction, onOpenListing }: { listings:
                     <button onClick={() => onOpenListing(listing.id)} className="text-slate-200 font-medium truncate max-w-[200px] hover:text-brand transition-colors text-left block">
                       {listing.title}
                     </button>
-                    <p className="text-xs text-slate-500">{CATEGORIES.find(c => c.id === listing.category)?.name || listing.category} · {listing.city}</p>
+                    <p className="text-xs text-slate-500">{CATEGORIES.find(c => c.id === listing.category)?.name || listing.category} · {listing.district || listing.city}{listing.state ? `, ${listing.state}` : ''}</p>
                   </div>
                 </td>
                 <td className="py-2.5 px-3 hidden md:table-cell">

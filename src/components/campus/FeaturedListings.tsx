@@ -126,7 +126,7 @@ function ListingCard({ listing, index }: { listing: Listing; index: number }) {
             {listing.condition}
           </Badge>
           <Badge variant="secondary" className="text-[10px] gap-1 rounded-full">
-            <MapPin className="w-2.5 h-2.5" /> {listing.city}
+            <MapPin className="w-2.5 h-2.5" /> {listing.district || listing.city}{listing.state ? `, ${listing.state}` : ''}
           </Badge>
         </div>
 

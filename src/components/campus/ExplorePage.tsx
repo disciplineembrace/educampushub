@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, SlidersHorizontal, X, ChevronDown, BookOpen, MapPin, ArrowUpDown, Heart, MessageCircle, BadgeCheck, Flame, Star, Eye } from 'lucide-react'
-import { useAppStore, formatINR, CATEGORIES, INDIAN_CITIES, CONDITIONS, SEMESTERS, parseListingImages } from '@/lib/store'
+import { useAppStore, formatINR, CATEGORIES, CONDITIONS, SEMESTERS, parseListingImages } from '@/lib/store'
+import { INDIAN_STATES, INDIAN_DISTRICTS } from '@/lib/indian-states-districts'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,7 +47,8 @@ export default function ExplorePage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [sortBy, setSortBy] = useState('newest')
-  const [city, setCity] = useState('all')
+  const [stateFilter, setStateFilter] = useState('all')
+  const [districtFilter, setDistrictFilter] = useState('all')
   const [condition, setCondition] = useState('all')
   const [semester, setSemester] = useState('all')
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -61,7 +63,8 @@ export default function ExplorePage() {
       params.set('sortBy', sortBy)
       if (searchQuery) params.set('search', searchQuery)
       if (selectedCategory && selectedCategory !== 'all') params.set('category', selectedCategory)
-      if (city && city !== 'all') params.set('city', city)
+      if (stateFilter && stateFilter !== 'all') params.set('state', stateFilter)
+      if (districtFilter && districtFilter !== 'all') params.set('district', districtFilter)
       if (condition && condition !== 'all') params.set('condition', condition)
       if (semester && semester !== 'all') params.set('semester', semester)
 
@@ -79,7 +82,7 @@ export default function ExplorePage() {
     } finally {
       setLoading(false)
     }
-  }, [searchQuery, selectedCategory, sortBy, city, condition, semester])
+  }, [searchQuery, selectedCategory, sortBy, stateFilter, districtFilter, condition, semester])
 
   useEffect(() => {
     setPage(1)
@@ -94,13 +97,14 @@ export default function ExplorePage() {
 
   const clearFilters = () => {
     setSelectedCategory(null)
-    setCity('all')
+    setStateFilter('all')
+    setDistrictFilter('all')
     setCondition('all')
     setSemester('all')
     setSearchQuery('')
   }
 
-  const activeFilters = [selectedCategory, city !== 'all' ? city : null, condition !== 'all' ? condition : null, semester !== 'all' ? semester : null].filter(Boolean)
+  const activeFilters = [selectedCategory, stateFilter !== 'all' ? stateFilter : null, districtFilter !== 'all' ? districtFilter : null, condition !== 'all' ? condition : null, semester !== 'all' ? semester : null].filter(Boolean)
 
   const handleCardClick = (id: string) => {
     setSelectedProductId(id)
@@ -186,7 +190,8 @@ export default function ExplorePage() {
                 {f}
                 <button onClick={() => {
                   if (f === selectedCategory) setSelectedCategory(null)
-                  if (f === city) setCity('all')
+                  if (f === stateFilter) { setStateFilter('all'); setDistrictFilter('all') }
+                  if (f === districtFilter) setDistrictFilter('all')
                   if (f === condition) setCondition('all')
                   if (f === semester) setSemester('all')
                 }}>
@@ -223,13 +228,30 @@ export default function ExplorePage() {
                   </Select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{t('explore.filter.city')}</label>
-                  <Select value={city} onValueChange={setCity}>
-                    <SelectTrigger className="h-9 rounded-xl"><SelectValue placeholder={t('explore.filter.allCities')} /></SelectTrigger>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">State</label>
+                  <Select value={stateFilter} onValueChange={v => { setStateFilter(v); setDistrictFilter('all') }}>
+                    <SelectTrigger className="h-9 rounded-xl"><SelectValue placeholder="All States" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">{t('explore.filter.allCities')}</SelectItem>
-                      {INDIAN_CITIES.map(c => (
-                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      <SelectItem value="all">All States</SelectItem>
+                      {INDIAN_STATES.map(s => (
+                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">District</label>
+                  <Select
+                    key={`explore-district-${stateFilter}`}
+                    value={districtFilter}
+                    onValueChange={setDistrictFilter}
+                    disabled={stateFilter === 'all'}
+                  >
+                    <SelectTrigger className="h-9 rounded-xl"><SelectValue placeholder={stateFilter !== 'all' ? 'All Districts' : 'Select state first'} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Districts</SelectItem>
+                      {(INDIAN_DISTRICTS[stateFilter] || []).map(d => (
+                        <SelectItem key={d} value={d}>{d}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -347,7 +369,7 @@ export default function ExplorePage() {
                       </div>
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
                         <Badge variant="secondary" className={`text-[10px] rounded-full ${conditionColor[listing.condition] || ''}`}>{listing.condition}</Badge>
-                        <Badge variant="secondary" className="text-[10px] gap-1 rounded-full"><MapPin className="w-2.5 h-2.5" />{listing.city}</Badge>
+                        <Badge variant="secondary" className="text-[10px] gap-1 rounded-full"><MapPin className="w-2.5 h-2.5" />{listing.district || listing.city}{listing.state ? `, ${listing.state}` : ''}</Badge>
                       </div>
                       <div className="flex items-center justify-between pt-3 border-t border-border">
                         <div className="flex items-center gap-2 min-w-0">

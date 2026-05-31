@@ -180,7 +180,7 @@ export async function POST(request: Request) {
       case 'edit_listing': {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         if (!updates) return NextResponse.json({ error: 'Missing updates' }, { status: 400 })
-        const allowedFields = ['title', 'description', 'originalPrice', 'sellingPrice', 'category', 'subcategory', 'city', 'condition', 'isFeatured', 'isVerified', 'isSold', 'isUrgent', 'isDigital']
+        const allowedFields = ['title', 'description', 'originalPrice', 'sellingPrice', 'category', 'subcategory', 'state', 'district', 'city', 'condition', 'isFeatured', 'isVerified', 'isSold', 'isUrgent', 'isDigital']
         const cleanUpdates: Record<string, unknown> = {}
         for (const key of allowedFields) {
           if (updates[key] !== undefined) {

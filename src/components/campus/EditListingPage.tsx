@@ -827,7 +827,8 @@ export default function EditListingPage() {
             <div data-error={!!validationErrors.district}>
               <Label className="mb-1.5 block">District *</Label>
               <Select
-                value={form.district || undefined}
+                key={`district-select-${form.state}`}
+                value={form.district && (INDIAN_DISTRICTS[form.state] || []).includes(form.district) ? form.district : undefined}
                 onValueChange={v => handleChange('district', v)}
                 disabled={!form.state}
               >

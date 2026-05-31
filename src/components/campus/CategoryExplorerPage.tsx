@@ -255,7 +255,7 @@ export default function CategoryExplorerPage() {
                         </div>
                         <div className="flex items-center justify-between">
                           <Badge variant="secondary" className="text-[9px] rounded-full">{listing.condition}</Badge>
-                          <span className="text-[10px] text-muted-foreground">{listing.city}</span>
+                          <span className="text-[10px] text-muted-foreground">{listing.district || listing.city}{listing.state ? `, ${listing.state}` : ''}</span>
                         </div>
                       </div>
                     </motion.div>

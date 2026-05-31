@@ -126,7 +126,7 @@ export default function WishlistPage() {
                       <span className="text-lg font-bold text-brand">{formatINR(listing.sellingPrice)}</span>
                       <div className="flex gap-2 mt-2">
                         <Badge variant="secondary" className="text-[10px] rounded-full">{listing.condition}</Badge>
-                        <Badge variant="secondary" className="text-[10px] gap-0.5 rounded-full"><MapPin className="w-2.5 h-2.5" />{listing.city}</Badge>
+                        <Badge variant="secondary" className="text-[10px] gap-0.5 rounded-full"><MapPin className="w-2.5 h-2.5" />{listing.district || listing.city}{listing.state ? `, ${listing.state}` : ''}</Badge>
                       </div>
                     </div>
                   </motion.div>
