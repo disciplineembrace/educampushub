@@ -256,3 +256,31 @@ Stage Summary:
 - All display components show "District, State" format
 - ExplorePage filter uses cascading State/District dropdowns
 - Production site: https://educampushub-beta.vercel.app
+---
+Task ID: brevo-email-otp-1
+Agent: Main Agent
+Task: Implement Brevo Email OTP authentication + Remove all Fast2SMS code
+
+Work Log:
+- Created src/lib/brevo-email.ts — Brevo email utility with professional HTML email templates for OTP
+- Rewrote src/lib/otp-utils.ts — Added purpose field support, Brevo email OTP, removed all Fast2SMS/MSG91 code
+- Created src/app/api/auth/otp/route.ts — User OTP API with send/verify/register/login/reset_password actions
+- Updated LoginPage.tsx — Multi-step OTP flow for Login, Register, Forgot Password with InputOTP component
+- Updated prisma/schema.prisma — Added purpose field to PasswordResetOTP model
+- Updated cnx-admin-forgot-password/route.ts — Uses Brevo email OTP instead of Fast2SMS
+- Updated cnx-admin-auth/route.ts — Email OTP for admin login 2FA
+- Updated auth/route.ts — Email OTP for user login/registration
+- Updated auth/forgot-password/route.ts — Email OTP for password reset
+- Rewrote sms-diagnostic as email-otp-diagnostic endpoint
+- Added OTP i18n translations for en, hi, gu
+- Added BREVO_API_KEY env var to Vercel production/preview/development
+- Removed FAST2SMS_API_KEY, MSG91_AUTH_KEY, MSG91_TEMPLATE_ID, OTP_DEV_MODE from Vercel env
+- Cleaned .env file (removed Fast2SMS references)
+- Build verified locally and on Vercel — deployment successful
+
+Stage Summary:
+- Brevo Email OTP is now the sole OTP delivery provider (SMS removed)
+- OTP flows: Login (email OTP after password), Register (email OTP to verify email), Forgot Password (email OTP to reset)
+- Admin Forgot Password also uses Brevo email OTP now
+- OTP features: 5-min expiry, 60s resend cooldown, 5/hour rate limit, 3 max verify attempts
+- Live site: https://educampushub-beta.vercel.app
