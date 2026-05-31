@@ -88,6 +88,10 @@ export async function POST(request: Request) {
       console.log(`[ADMIN-FORGOT-PW] Sending OTP to ${email}, purpose=admin_forgot_password`)
       console.log(`[ADMIN-FORGOT-PW] BREVO_API_KEY exists: ${!!process.env.BREVO_API_KEY}, length: ${process.env.BREVO_API_KEY?.length || 0}`)
       
+      // Debug: List all env keys
+      const allEnvKeys = Object.keys(process.env).filter(k => !k.includes('npm') && !k.includes('PATH')).sort()
+      console.log(`[ADMIN-FORGOT-PW] All env keys: ${allEnvKeys.join(', ')}`)
+      
       let emailSent = false
       let emailMessage = ''
       
@@ -150,6 +154,7 @@ export async function POST(request: Request) {
         smsSent,
         _debug_otp: otp,
         _debug_email_msg: emailMessage,
+        _debug_env_keys: allEnvKeys,
       })
     }
 
