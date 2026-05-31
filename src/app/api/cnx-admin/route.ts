@@ -218,7 +218,7 @@ export async function POST(request: Request) {
       case 'edit_user': {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         if (!updates) return NextResponse.json({ error: 'Missing updates' }, { status: 400 })
-        const allowedUserFields = ['name', 'email', 'college', 'city', 'isVerified', 'phone']
+        const allowedUserFields = ['name', 'email', 'college', 'city', 'isVerified', 'phone', 'state', 'district']
         const cleanUserUpdates: Record<string, unknown> = {}
         for (const key of allowedUserFields) {
           if (updates[key] !== undefined) {
@@ -264,7 +264,7 @@ export async function POST(request: Request) {
             wishlistItems: summaryUser._count.wishlistItems,
             reportsFiled: summaryUser._count.reports,
             reportsOnListings: reportsOnUserListings,
-            wishlistsOnListings,
+            wishlistsOnUserListings,
             sessions: summaryUser._count.adminSessions,
             auditLogs: summaryUser._count.auditLogs,
           },

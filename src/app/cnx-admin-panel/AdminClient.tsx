@@ -456,6 +456,8 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
             originalPrice: d.listing.originalPrice,
             sellingPrice: d.listing.sellingPrice,
             category: d.listing.category,
+            state: d.listing.state || '',
+            district: d.listing.district || '',
             city: d.listing.city,
             condition: d.listing.condition,
             isFeatured: d.listing.isFeatured,
@@ -570,7 +572,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   // Save listing edits
   const saveListingEdits = async () => {
     if (!selectedListing || !listingEditForm) return
-    const success = await adminActionWithUpdates('edit_listing', selectedListing.id, listingEditForm)
+    const success = await adminActionWithUpdates('edit_listing', selectedListing.id, listingEditForm as unknown as Record<string, unknown>)
     if (success) {
       setListingEditMode(false)
       refreshListingDetail(selectedListing.id)
@@ -580,7 +582,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   // Save user edits
   const saveUserEdits = async () => {
     if (!selectedUser || !userEditForm) return
-    const success = await adminActionWithUpdates('edit_user', selectedUser.id, userEditForm)
+    const success = await adminActionWithUpdates('edit_user', selectedUser.id, userEditForm as unknown as Record<string, unknown>)
     if (success) {
       setUserEditMode(false)
       refreshUserDetail(selectedUser.id)
@@ -1292,9 +1294,10 @@ function ListingDetailModal({
 // ─── User Detail Modal ────────────────────────────────────────────
 
 function UserDetailModal({
-  user, editMode, editForm, userListings, userListingsLoading, onSetEditMode, onSetEditForm, onSave, onAction, onOpenListing, onClose, onRefresh, adminId
+  user, userDetail, editMode, editForm, userListings, userListingsLoading, onSetEditMode, onSetEditForm, onSave, onAction, onOpenListing, onDeleteUser, deleteSummaryLoading, onClose, onRefresh, adminId
 }: {
   user: UserItem
+  userDetail: UserDetailData | null
   editMode: boolean
   editForm: UserEditForm | null
   userListings: ListingItem[]
@@ -1304,6 +1307,8 @@ function UserDetailModal({
   onSave: () => void
   onAction: (a: string, t: string) => void
   onOpenListing: (id: string) => void
+  onDeleteUser: (id: string) => void
+  deleteSummaryLoading: boolean
   onClose: () => void
   onRefresh: () => void
   adminId: string
@@ -1311,6 +1316,7 @@ function UserDetailModal({
   if (!editForm) return null
 
   const isSelf = user.id === adminId
+  const detail = userDetail
 
   return (
     <motion.div
@@ -1324,18 +1330,21 @@ function UserDetailModal({
         initial={{ scale: 0.95, y: 20 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.95, y: 20 }}
-        className="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl my-8"
+        className="w-full max-w-4xl bg-slate-900 border border-slate-700 rounded-2xl my-8"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-800">
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand to-accent flex items-center justify-center text-white font-bold shrink-0">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold shrink-0 ${user.premiumActive ? 'bg-gradient-to-br from-amber-400 to-orange-500 ring-2 ring-amber-400/30' : 'bg-gradient-to-br from-brand to-accent'}`}>
               {user.name.charAt(0)}
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg font-bold text-slate-100 truncate">{editMode ? 'Edit User' : user.name}</h2>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-slate-100 truncate">{editMode ? 'Edit User' : user.name}</h2>
+                {user.premiumActive && <Crown className="w-4 h-4 text-amber-400 shrink-0" />}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap mt-0.5">
                 <p className="text-xs text-slate-500">{user.email}</p>
                 {user.isAdmin && <RoleBadge role={user.adminRole || 'support_admin'} />}
               </div>
@@ -1366,10 +1375,14 @@ function UserDetailModal({
         <div className="p-5 space-y-5 max-h-[calc(90vh-180px)] overflow-y-auto custom-scrollbar">
           {/* Status badges */}
           <div className="flex gap-2 flex-wrap">
-            {user.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-xs rounded-full">Verified</Badge>}
+            {user.premiumActive && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-xs rounded-full gap-1"><Crown className="w-3 h-3" />Premium</Badge>}
+            {user.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-xs rounded-full"><BadgeCheck className="w-3 h-3 inline mr-0.5" />Verified</Badge>}
             {user.isBanned && <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-xs rounded-full">Banned</Badge>}
             {user.isAdmin && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-xs rounded-full">Admin</Badge>}
-            {!user.isBanned && !user.isAdmin && <Badge className="bg-slate-700/50 text-slate-400 border-slate-700 text-xs rounded-full">Active</Badge>}
+            {!user.isBanned && !user.isAdmin && !user.premiumActive && <Badge className="bg-slate-700/50 text-slate-400 border-slate-700 text-xs rounded-full">Active</Badge>}
+            <Badge className={`text-xs rounded-full ${user.planType === 'premium' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20 border' : 'bg-slate-700/30 text-slate-400 border-slate-700'}`}>
+              {(user.planType || 'normal').charAt(0).toUpperCase() + (user.planType || 'normal').slice(1)} Plan
+            </Badge>
           </div>
 
           {editMode ? (
@@ -1388,173 +1401,487 @@ function UserDetailModal({
                 <Input value={editForm.college} onChange={e => onSetEditForm({ ...editForm, college: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
               </div>
               <div>
-                <Label className="text-slate-400 text-xs mb-1 block">City</Label>
-                <Input value={editForm.city} onChange={e => onSetEditForm({ ...editForm, city: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
-              </div>
-              <div>
                 <Label className="text-slate-400 text-xs mb-1 block">Phone</Label>
                 <Input value={editForm.phone} onChange={e => onSetEditForm({ ...editForm, phone: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
               </div>
-              <div className="flex items-center justify-between pt-5">
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">State</Label>
+                <Select value={editForm.state || undefined} onValueChange={v => onSetEditForm({ ...editForm, state: v, district: '' })}>
+                  <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 w-full">
+                    <SelectValue placeholder="Select state" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700 max-h-60">
+                    {INDIAN_STATES.map(s => (
+                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">District</Label>
+                <Select
+                  key={`user-edit-district-${editForm.state}`}
+                  value={editForm.district && (INDIAN_DISTRICTS[editForm.state] || []).includes(editForm.district) ? editForm.district : undefined}
+                  onValueChange={v => onSetEditForm({ ...editForm, district: v, city: v })}
+                  disabled={!editForm.state}
+                >
+                  <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 w-full">
+                    <SelectValue placeholder={editForm.state ? 'Select district' : 'Select state first'} />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700 max-h-60">
+                    {(INDIAN_DISTRICTS[editForm.state] || []).map(d => (
+                      <SelectItem key={d} value={d}>{d}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center justify-between pt-5 sm:col-span-2">
                 <Label className="text-slate-300 text-sm">Verified</Label>
                 <Switch checked={editForm.isVerified} onCheckedChange={v => onSetEditForm({ ...editForm, isVerified: v })} />
               </div>
             </div>
           ) : (
-            /* Read Mode */
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-slate-500 text-xs mb-1">College</p>
-                <p className="text-slate-200">{user.college || '—'}</p>
+            /* Read Mode - Comprehensive User Info */
+            <>
+              {/* Profile Info Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">College</p>
+                  <p className="text-slate-200">{user.college || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">Phone</p>
+                  <p className="text-slate-200">{user.phone || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">State / District</p>
+                  <p className="text-slate-200">{user.state || user.city || '—'}{user.district ? `, ${user.district}` : ''}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">Rating</p>
+                  <p className="text-slate-200">{user.rating.toFixed(1)} / 5.0</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">Total Sales</p>
+                  <p className="text-slate-200">{user.totalSales}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">Joined</p>
+                  <p className="text-slate-300">{new Date(user.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                </div>
               </div>
+
+              {/* Upload & Plan Info */}
+              {detail && (
+                <>
+                  <Separator className="bg-slate-800" />
+                  <div>
+                    <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Upload & Plan Details</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                        <p className="text-lg font-bold text-slate-100">{detail.freeUploadUsed ?? 0}<span className="text-xs text-slate-500">/5</span></p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Free Uploads Used</p>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                        <p className="text-lg font-bold text-slate-100">{detail.paidUploadCredits ?? 0}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Paid Credits</p>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                        <p className="text-lg font-bold text-slate-100">{detail.totalBooksUploaded ?? 0}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Total Books</p>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                        <p className="text-lg font-bold text-slate-100">{detail.premiumActive ? `${detail.premiumBooksUsed ?? 0}/${detail.premiumBookLimit ?? 29}` : '—'}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Premium Quota</p>
+                      </div>
+                    </div>
+                    {detail.premiumActive && detail.premiumExpiryDate && (
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        <Crown className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-amber-300">Premium expires: {new Date(detail.premiumExpiryDate).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <Separator className="bg-slate-800" />
+
+              {/* User's Listings */}
               <div>
-                <p className="text-slate-500 text-xs mb-1">City</p>
-                <p className="text-slate-200">{user.city || '—'}</p>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">
+                    Assigned Listings ({detail?.listings?.length ?? userListings.length})
+                  </p>
+                  {detail && detail.listings.length > 0 && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="ghost" className="h-6 text-[10px] text-orange-400 hover:bg-orange-500/10 gap-1">
+                          <ListX className="w-3 h-3" /> Remove All
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="bg-slate-900 border-slate-700">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="text-slate-100">Remove All Listings</AlertDialogTitle>
+                          <AlertDialogDescription className="text-slate-400">
+                            Permanently delete all {detail.listings.length} listing(s) by {user.name}? This cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => { onAction('delete_user_listings', user.id); onRefresh() }} className="bg-orange-600 hover:bg-orange-700 text-white">
+                            Delete All
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </div>
+                {userListingsLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="h-10 bg-slate-800 rounded animate-pulse" />
+                    ))}
+                  </div>
+                ) : (detail?.listings ?? userListings).length === 0 ? (
+                  <p className="text-slate-500 text-sm py-4 text-center">No listings assigned</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar">
+                    {(detail?.listings ?? userListings).map(l => (
+                      <div
+                        key={l.id}
+                        className="flex items-center justify-between p-2.5 bg-slate-800/50 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors group"
+                        onClick={() => { onClose(); onOpenListing(l.id) }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-slate-200 truncate">{l.title}</p>
+                          <div className="flex gap-1 mt-0.5">
+                            {l.isSold && <Badge className="bg-slate-700 text-slate-300 border-0 text-[9px] rounded-full px-1.5">Sold</Badge>}
+                            {l.isFeatured && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px] rounded-full px-1.5">Featured</Badge>}
+                            {l.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[9px] rounded-full px-1.5">Verified</Badge>}
+                            {l.uploadType === 'premium' && <Badge className="bg-amber-500/10 text-amber-300 border-amber-500/20 text-[9px] rounded-full px-1.5">Premium</Badge>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-3">
+                          <span className="text-sm text-slate-300 font-mono">{formatINR(l.sellingPrice)}</span>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent className="bg-slate-900 border-slate-700" onClick={e => e.stopPropagation()}>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="text-slate-100">Remove Listing</AlertDialogTitle>
+                                <AlertDialogDescription className="text-slate-400">
+                                  Permanently delete &quot;{l.title}&quot;? This cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => { onAction('delete_listing', l.id); onRefresh() }} className="bg-red-600 hover:bg-red-700 text-white">
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+
+              {/* Payment History */}
+              {detail && detail.payments.length > 0 && (
+                <>
+                  <Separator className="bg-slate-800" />
+                  <div>
+                    <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Payment History ({detail.payments.length})</p>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                      {detail.payments.slice(0, 10).map(p => (
+                        <div key={p.id} className="flex items-center justify-between p-2 bg-slate-800/30 rounded-lg text-xs">
+                          <div className="flex items-center gap-2">
+                            <Badge className={`${p.status === 'verified' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : p.status === 'rejected' ? 'bg-red-500/15 text-red-400 border-red-500/30' : 'bg-amber-500/15 text-amber-400 border-amber-500/30'} border text-[9px] rounded-full`}>
+                              {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
+                            </Badge>
+                            <span className="text-slate-400">{p.paymentType === 'premium_plan' ? 'Premium Plan' : 'Upload Fee'}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-300 font-mono">{formatINR(p.amount)}</span>
+                            <span className="text-slate-500">{new Date(p.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Reports by User */}
+              {detail && detail.reports.length > 0 && (
+                <>
+                  <Separator className="bg-slate-800" />
+                  <div>
+                    <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Reports Filed ({detail.reports.length})</p>
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar">
+                      {detail.reports.slice(0, 5).map(r => (
+                        <div key={r.id} className="flex items-center justify-between p-2 bg-slate-800/30 rounded-lg text-xs">
+                          <div className="min-w-0 flex-1">
+                            <span className="text-slate-300 truncate block">{r.reason}</span>
+                            <span className="text-slate-500">on: {r.listing.title}</span>
+                          </div>
+                          <Badge className={`${r.isResolved ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'} border-0 text-[9px] rounded-full ml-2`}>
+                            {r.isResolved ? 'Resolved' : 'Open'}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Wishlist */}
+              {detail && detail.wishlistItems.length > 0 && (
+                <>
+                  <Separator className="bg-slate-800" />
+                  <div>
+                    <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Wishlist ({detail.wishlistItems.length})</p>
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar">
+                      {detail.wishlistItems.slice(0, 5).map(w => (
+                        <div key={w.id} className="flex items-center justify-between p-2 bg-slate-800/30 rounded-lg text-xs">
+                          <span className="text-slate-300 truncate">{w.listing.title}</span>
+                          <span className="text-slate-400 font-mono">{formatINR(w.listing.sellingPrice)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <Separator className="bg-slate-800" />
+
+              {/* Action buttons */}
               <div>
-                <p className="text-slate-500 text-xs mb-1">Phone</p>
-                <p className="text-slate-200">{user.phone || '—'}</p>
+                <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Admin Actions</p>
+                <div className="flex flex-wrap gap-2">
+                  {!user.isVerified && (
+                    <Button size="sm" variant="outline" onClick={() => { onAction('verify_seller', user.id); onRefresh() }} className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 gap-1.5 rounded-xl text-xs">
+                      <BadgeCheck className="w-3.5 h-3.5" /> Verify
+                    </Button>
+                  )}
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="outline" className={`gap-1.5 rounded-xl text-xs ${user.isBanned ? 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10' : 'border-red-500/30 text-red-400 hover:bg-red-500/10'}`}>
+                        <Ban className="w-3.5 h-3.5" /> {user.isBanned ? 'Unban' : 'Ban'}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="bg-slate-900 border-slate-700">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="text-slate-100">{user.isBanned ? 'Unban User' : 'Ban User'}</AlertDialogTitle>
+                        <AlertDialogDescription className="text-slate-400">
+                          {user.isBanned
+                            ? `Are you sure you want to unban ${user.name}?`
+                            : `Are you sure you want to ban ${user.name}? They will lose access to their account.`}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => { onAction(user.isBanned ? 'unban_user' : 'ban_user', user.id); onRefresh() }}
+                          className={user.isBanned ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}
+                        >
+                          {user.isBanned ? 'Unban' : 'Ban'}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="outline" className={`gap-1.5 rounded-xl text-xs ${user.premiumActive ? 'border-red-500/30 text-red-400 hover:bg-red-500/10' : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'}`}>
+                        <Crown className="w-3.5 h-3.5" /> {user.premiumActive ? 'Deactivate Premium' : 'Activate Premium'}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="bg-slate-900 border-slate-700">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="text-slate-100">{user.premiumActive ? 'Deactivate Premium' : 'Activate Premium'}</AlertDialogTitle>
+                        <AlertDialogDescription className="text-slate-400">
+                          {user.premiumActive
+                            ? `Remove Premium status from ${user.name}? They will lose premium features.`
+                            : `Manually activate Premium for ${user.name}? They will get 29 book uploads for 30 days.`}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => { onAction('toggle_premium', user.id); onRefresh() }}
+                          className={user.premiumActive ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-amber-600 hover:bg-amber-700 text-white'}
+                        >
+                          {user.premiumActive ? 'Deactivate' : 'Activate'}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  {!isSelf && !user.isAdmin && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-red-600/50 text-red-500 hover:bg-red-500/10 gap-1.5 rounded-xl text-xs"
+                      onClick={() => onDeleteUser(user.id)}
+                      disabled={deleteSummaryLoading}
+                    >
+                      <UserX className="w-3.5 h-3.5" />
+                      {deleteSummaryLoading ? 'Loading...' : 'Delete User Account'}
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-xs mb-1">Rating</p>
-                <p className="text-slate-200">{user.rating.toFixed(1)} / 5.0</p>
-              </div>
-              <div>
-                <p className="text-slate-500 text-xs mb-1">Total Sales</p>
-                <p className="text-slate-200">{user.totalSales}</p>
-              </div>
-              <div>
-                <p className="text-slate-500 text-xs mb-1">Joined</p>
-                <p className="text-slate-300">{new Date(user.createdAt).toLocaleDateString()}</p>
-              </div>
-              <div>
-                <p className="text-slate-500 text-xs mb-1">Listings Count</p>
-                <p className="text-slate-200">{user._count.listings}</p>
+            </>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ─── Delete User Confirmation Modal ─────────────────────────────────
+
+function DeleteUserConfirmModal({
+  summary, deleting, onConfirm, onCancel
+}: {
+  summary: DeleteSummary
+  deleting: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const r = summary.resources
+  const totalAffected = r.listings + r.payments + r.wishlistItems + r.reportsFiled + r.wishlistsOnListings + r.reportsOnListings + r.sessions
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 20 }}
+        className="w-full max-w-2xl bg-slate-900 border border-red-500/30 rounded-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="p-5 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center shrink-0">
+              <UserX className="w-5 h-5 text-red-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-red-400">Permanently Delete User Account</h2>
+              <p className="text-xs text-slate-500">This action is IRREVERSIBLE. Review the data that will be destroyed.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* User Info */}
+        <div className="p-5 space-y-4 max-h-[calc(80vh-180px)] overflow-y-auto custom-scrollbar">
+          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+            <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Account Details</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div><span className="text-slate-500">Name:</span> <span className="text-slate-200 font-medium">{summary.user.name}</span></div>
+              <div><span className="text-slate-500">Email:</span> <span className="text-slate-200">{summary.user.email}</span></div>
+              <div><span className="text-slate-500">Phone:</span> <span className="text-slate-200">{summary.user.phone || '—'}</span></div>
+              <div><span className="text-slate-500">College:</span> <span className="text-slate-200">{summary.user.college || '—'}</span></div>
+              <div><span className="text-slate-500">Location:</span> <span className="text-slate-200">{summary.user.district}{summary.user.state ? `, ${summary.user.state}` : ''}</span></div>
+              <div><span className="text-slate-500">Joined:</span> <span className="text-slate-200">{new Date(summary.user.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}</span></div>
+            </div>
+          </div>
+
+          {/* Resources Affected */}
+          <div className="bg-red-500/5 rounded-xl p-4 border border-red-500/20">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <p className="text-sm font-semibold text-red-400">Resources That Will Be Destroyed</p>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {[
+                { label: 'Listings', value: r.listings, sub: `${r.activeListings} active, ${r.soldListings} sold` },
+                { label: 'Premium Listings', value: r.premiumListings, sub: r.featuredListings > 0 ? `${r.featuredListings} featured` : undefined },
+                { label: 'Total Views Lost', value: r.totalViews, sub: `${r.totalSaves} saves` },
+                { label: 'Payments', value: r.payments, sub: `${r.verifiedPayments} verified` },
+                { label: 'Spent on Platform', value: formatINR(r.totalSpentOnPlatform), sub: 'total verified' },
+                { label: 'Wishlist Items', value: r.wishlistItems, sub: 'saved by user' },
+                { label: 'Reports Filed', value: r.reportsFiled, sub: 'by this user' },
+                { label: 'Reports on Listings', value: r.reportsOnListings, sub: 'on their listings' },
+                { label: 'Wishlists on Listings', value: r.wishlistsOnListings, sub: 'by other users' },
+              ].filter(item => typeof item.value === 'string' || item.value > 0).map(item => (
+                <div key={item.label} className="bg-slate-800/50 rounded-lg p-2.5">
+                  <p className="text-sm font-bold text-slate-200">{item.value}</p>
+                  <p className="text-[10px] text-slate-500">{item.label}</p>
+                  {item.sub && <p className="text-[9px] text-slate-600 mt-0.5">{item.sub}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Listing Titles That Will Be Deleted */}
+          {summary.listingTitles.length > 0 && (
+            <div className="bg-slate-800/30 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">
+                Listings to be deleted ({summary.listingTitles.length}{r.listings > 10 ? ` of ${r.listings}` : ''})
+              </p>
+              <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                {summary.listingTitles.map(l => (
+                  <div key={l.id} className="flex items-center justify-between text-xs py-1">
+                    <span className="text-slate-300 truncate flex-1">{l.title}</span>
+                    <span className="text-slate-400 font-mono ml-2">{formatINR(l.price)}</span>
+                  </div>
+                ))}
+                {r.listings > 10 && (
+                  <p className="text-xs text-slate-500 mt-1">+ {r.listings - 10} more listings</p>
+                )}
               </div>
             </div>
           )}
 
-          <Separator className="bg-slate-800" />
-
-          {/* User's Listings */}
-          <div>
-            <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">User&apos;s Listings ({userListings.length})</p>
-            {userListingsLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-10 bg-slate-800 rounded animate-pulse" />
-                ))}
-              </div>
-            ) : userListings.length === 0 ? (
-              <p className="text-slate-500 text-sm">No listings</p>
-            ) : (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
-                {userListings.map(l => (
-                  <div
-                    key={l.id}
-                    className="flex items-center justify-between p-2.5 bg-slate-800/50 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
-                    onClick={() => { onClose(); onOpenListing(l.id) }}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-slate-200 truncate">{l.title}</p>
-                      <div className="flex gap-1 mt-0.5">
-                        {l.isSold && <Badge className="bg-slate-700 text-slate-300 border-0 text-[9px] rounded-full px-1.5">Sold</Badge>}
-                        {l.isFeatured && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px] rounded-full px-1.5">Featured</Badge>}
-                        {l.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[9px] rounded-full px-1.5">Verified</Badge>}
-                      </div>
-                    </div>
-                    <span className="text-sm text-slate-300 font-mono shrink-0 ml-3">{formatINR(l.sellingPrice)}</span>
-                  </div>
-                ))}
-              </div>
+          {/* Total Impact */}
+          <div className="flex items-center justify-between bg-red-500/10 rounded-xl p-3 border border-red-500/20">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <span className="text-sm font-medium text-red-300">Total affected records: {totalAffected}</span>
+            </div>
+            {summary.user.premiumActive && (
+              <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-xs rounded-full">
+                Premium User
+              </Badge>
             )}
           </div>
+        </div>
 
-          <Separator className="bg-slate-800" />
-
-          {/* Action buttons */}
-          <div>
-            <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Actions</p>
-            <div className="flex flex-wrap gap-2">
-              {!user.isVerified && (
-                <Button size="sm" variant="outline" onClick={() => { onAction('verify_seller', user.id); onRefresh() }} className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 gap-1.5 rounded-xl text-xs">
-                  <BadgeCheck className="w-3.5 h-3.5" /> Verify
-                </Button>
-              )}
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" variant="outline" className={`gap-1.5 rounded-xl text-xs ${user.isBanned ? 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10' : 'border-red-500/30 text-red-400 hover:bg-red-500/10'}`}>
-                    <Ban className="w-3.5 h-3.5" /> {user.isBanned ? 'Unban' : 'Ban'}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent className="bg-slate-900 border-slate-700">
-                  <AlertDialogHeader>
-                    <AlertDialogTitle className="text-slate-100">{user.isBanned ? 'Unban User' : 'Ban User'}</AlertDialogTitle>
-                    <AlertDialogDescription className="text-slate-400">
-                      {user.isBanned
-                        ? `Are you sure you want to unban ${user.name}?`
-                        : `Are you sure you want to ban ${user.name}? They will lose access to their account.`}
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() => { onAction(user.isBanned ? 'unban_user' : 'ban_user', user.id); onRefresh() }}
-                      className={user.isBanned ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}
-                    >
-                      {user.isBanned ? 'Unban' : 'Ban'}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" variant="outline" className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10 gap-1.5 rounded-xl text-xs">
-                    <ListX className="w-3.5 h-3.5" /> Delete All Listings
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent className="bg-slate-900 border-slate-700">
-                  <AlertDialogHeader>
-                    <AlertDialogTitle className="text-slate-100">Delete All User Listings</AlertDialogTitle>
-                    <AlertDialogDescription className="text-slate-400">
-                      Are you sure you want to delete ALL listings by {user.name}? This will permanently remove {user._count.listings} listing(s) and cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => { onAction('delete_user_listings', user.id); onRefresh() }} className="bg-orange-600 hover:bg-orange-700 text-white">
-                      Delete All Listings
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              {!isSelf && !user.isAdmin && (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button size="sm" variant="outline" className="border-red-600/50 text-red-500 hover:bg-red-500/10 gap-1.5 rounded-xl text-xs">
-                      <UserX className="w-3.5 h-3.5" /> Delete User Account
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent className="bg-slate-900 border-slate-700">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle className="text-slate-100 text-red-400">⚠️ Delete User Account Permanently</AlertDialogTitle>
-                      <AlertDialogDescription className="text-slate-400">
-                        This will PERMANENTLY delete the account for <strong className="text-slate-200">{user.name}</strong> ({user.email}).
-                        All their listings, wishlists, reports, payments, and session data will be destroyed.
-                        This action is IRREVERSIBLE.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => { onAction('delete_user', user.id); onClose() }} className="bg-red-600 hover:bg-red-700 text-white">
-                        Delete Permanently
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              )}
-            </div>
-          </div>
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-800">
+          <Button variant="ghost" onClick={onCancel} className="text-slate-400 hover:text-slate-200" disabled={deleting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={deleting}
+            className="bg-red-600 hover:bg-red-700 text-white gap-2"
+          >
+            {deleting ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <UserX className="w-4 h-4" />
+                Permanently Delete Account
+              </>
+            )}
+          </Button>
         </div>
       </motion.div>
     </motion.div>
@@ -1739,69 +2066,107 @@ function OverviewTab({ stats, loading, onAction, onOpenListing }: { stats: Stats
 
 // ─── Users Tab ────────────────────────────────────────────────────
 
-function UsersTab({ users, loading, onAction, onOpenUser, adminId }: { users: UserItem[]; loading: boolean; onAction: (a: string, t: string, d?: string) => void; onOpenUser: (u: UserItem) => void; adminId: string }) {
+function UsersTab({ users, loading, onAction, onOpenUser, adminId, onDeleteUser, deleteSummaryLoading }: { users: UserItem[]; loading: boolean; onAction: (a: string, t: string, d?: string) => void; onOpenUser: (u: UserItem) => void; adminId: string; onDeleteUser: (id: string) => void; deleteSummaryLoading: boolean }) {
   if (loading) {
     return <LoadingSkeleton />
   }
 
+  const normalUsers = users.filter(u => !u.isAdmin)
+  const adminUsers = users.filter(u => u.isAdmin)
+  const premiumCount = users.filter(u => u.premiumActive).length
+  const bannedCount = users.filter(u => u.isBanned).length
+  const verifiedCount = users.filter(u => u.isVerified).length
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-400">{users.length} users</p>
+    <div className="space-y-4">
+      {/* Summary Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <Card className="p-3 bg-slate-900/50 border-slate-800">
+          <p className="text-xl font-bold text-slate-100">{users.length}</p>
+          <p className="text-[10px] text-slate-500">Total Users</p>
+        </Card>
+        <Card className="p-3 bg-slate-900/50 border-slate-800">
+          <p className="text-xl font-bold text-amber-400">{premiumCount}</p>
+          <p className="text-[10px] text-slate-500">Premium</p>
+        </Card>
+        <Card className="p-3 bg-slate-900/50 border-slate-800">
+          <p className="text-xl font-bold text-emerald-400">{verifiedCount}</p>
+          <p className="text-[10px] text-slate-500">Verified</p>
+        </Card>
+        <Card className="p-3 bg-slate-900/50 border-slate-800">
+          <p className="text-xl font-bold text-red-400">{bannedCount}</p>
+          <p className="text-[10px] text-slate-500">Banned</p>
+        </Card>
+        <Card className="p-3 bg-slate-900/50 border-slate-800">
+          <p className="text-xl font-bold text-slate-300">{adminUsers.length}</p>
+          <p className="text-[10px] text-slate-500">Admins</p>
+        </Card>
       </div>
+
+      {/* Users Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-800">
               <th className="text-left py-2.5 px-3 text-slate-500 font-medium text-xs">User</th>
-              <th className="text-left py-2.5 px-3 text-slate-500 font-medium text-xs hidden md:table-cell">College</th>
+              <th className="text-left py-2.5 px-3 text-slate-500 font-medium text-xs hidden md:table-cell">Location / College</th>
               <th className="text-left py-2.5 px-3 text-slate-500 font-medium text-xs hidden lg:table-cell">Listings</th>
-              <th className="text-left py-2.5 px-3 text-slate-500 font-medium text-xs">Status</th>
+              <th className="text-left py-2.5 px-3 text-slate-500 font-medium text-xs hidden sm:table-cell">Plan</th>
+              <th className="text-left py-2.5 px-3 text-slate-500 font-medium text-xs">Status / Role</th>
               <th className="text-right py-2.5 px-3 text-slate-500 font-medium text-xs">Actions</th>
             </tr>
           </thead>
           <tbody>
             {users.map(user => (
-              <tr key={user.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+              <tr key={user.id} className={`border-b border-slate-800/50 hover:bg-slate-800/30 ${user.isBanned ? 'opacity-60' : ''}`}>
                 <td className="py-2.5 px-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand to-accent flex items-center justify-center text-white text-xs font-bold shrink-0">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 ${user.premiumActive ? 'bg-gradient-to-br from-amber-400 to-orange-500' : user.isAdmin ? 'bg-gradient-to-br from-amber-500 to-red-500' : 'bg-gradient-to-br from-brand to-accent'}`}>
                       {user.name.charAt(0)}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-slate-200 font-medium truncate">{user.name}</span>
+                        <span className="text-slate-200 font-medium truncate max-w-[140px]">{user.name}</span>
                         {user.premiumActive && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
                         {user.isVerified && <BadgeCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                       </div>
-                      <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                      <p className="text-xs text-slate-500 truncate max-w-[160px]">{user.email}</p>
+                      {user.phone && <p className="text-[10px] text-slate-600 truncate">{user.phone}</p>}
                     </div>
                   </div>
                 </td>
-                <td className="py-2.5 px-3 text-slate-400 hidden md:table-cell">{user.college || '—'}</td>
+                <td className="py-2.5 px-3 hidden md:table-cell">
+                  <p className="text-slate-400 text-xs truncate max-w-[150px]">{user.college || '—'}</p>
+                  <p className="text-[10px] text-slate-500 truncate">{user.district ? `${user.district}, ${user.state || ''}` : user.city || '—'}</p>
+                </td>
                 <td className="py-2.5 px-3 text-slate-300 font-mono hidden lg:table-cell">{user._count.listings}</td>
+                <td className="py-2.5 px-3 hidden sm:table-cell">
+                  <Badge className={`text-[10px] rounded-full ${user.planType === 'premium' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20 border' : 'bg-slate-700/30 text-slate-400 border-slate-700'}`}>
+                    {(user.planType || 'normal').charAt(0).toUpperCase() + (user.planType || 'normal').slice(1)}
+                  </Badge>
+                </td>
                 <td className="py-2.5 px-3">
                   <div className="flex gap-1 flex-wrap">
-                    {user.premiumActive && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-[10px] rounded-full gap-0.5"><Crown className="w-2.5 h-2.5" />Premium</Badge>}
                     {user.isAdmin && <RoleBadge role={user.adminRole || 'support_admin'} />}
+                    {user.premiumActive && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-[10px] rounded-full gap-0.5"><Crown className="w-2.5 h-2.5" />Pro</Badge>}
                     {user.isBanned && <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-[10px] rounded-full">Banned</Badge>}
                     {!user.isBanned && !user.isAdmin && !user.premiumActive && <Badge className="bg-slate-700/50 text-slate-400 border-slate-700 text-[10px] rounded-full">Active</Badge>}
                   </div>
                 </td>
                 <td className="py-2.5 px-3">
                   <div className="flex justify-end gap-1">
-                    {/* View button */}
+                    {/* View / Select button */}
                     <Button size="sm" variant="ghost" onClick={() => onOpenUser(user)} className="h-7 text-xs text-cyan-400 hover:bg-cyan-500/10 gap-1">
                       <Eye className="w-3 h-3" /> View
                     </Button>
                     {!user.isVerified && (
-                      <Button size="sm" variant="ghost" onClick={() => onAction('verify_seller', user.id)} className="h-7 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => onAction('verify_seller', user.id)} className="h-7 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 gap-1" title="Verify">
                         <BadgeCheck className="w-3 h-3" />
                       </Button>
                     )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button size="sm" variant="ghost" className={`h-7 text-xs gap-1 ${user.isBanned ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-red-400 hover:bg-red-500/10'}`}>
+                        <Button size="sm" variant="ghost" className={`h-7 text-xs gap-1 ${user.isBanned ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-red-400 hover:bg-red-500/10'}`} title={user.isBanned ? 'Unban' : 'Ban'}>
                           <Ban className="w-3 h-3" />
                         </Button>
                       </AlertDialogTrigger>
@@ -1825,34 +2190,10 @@ function UsersTab({ users, loading, onAction, onOpenUser, adminId }: { users: Us
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
-                    {/* Delete user listings */}
-                    {user._count.listings > 0 && (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button size="sm" variant="ghost" className="h-7 text-xs text-orange-400 hover:bg-orange-500/10">
-                            <ListX className="w-3 h-3" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent className="bg-slate-900 border-slate-700">
-                          <AlertDialogHeader>
-                            <AlertDialogTitle className="text-slate-100">Delete All Listings</AlertDialogTitle>
-                            <AlertDialogDescription className="text-slate-400">
-                              Delete all {user._count.listings} listing(s) by {user.name}? This cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => onAction('delete_user_listings', user.id)} className="bg-orange-600 hover:bg-orange-700 text-white">
-                              Delete All
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    )}
                     {/* Toggle Premium */}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button size="sm" variant="ghost" className={`h-7 text-xs gap-1 ${user.premiumActive ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-400 hover:bg-slate-700/50'}`}>
+                        <Button size="sm" variant="ghost" className={`h-7 text-xs gap-1 ${user.premiumActive ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-400 hover:bg-slate-700/50'}`} title={user.premiumActive ? 'Deactivate Premium' : 'Activate Premium'}>
                           <Crown className="w-3 h-3" />
                         </Button>
                       </AlertDialogTrigger>
@@ -1876,29 +2217,18 @@ function UsersTab({ users, loading, onAction, onOpenUser, adminId }: { users: Us
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
-                    {/* Delete user - not for admins or self */}
+                    {/* Delete user - not for admins or self - uses delete summary flow */}
                     {!user.isAdmin && user.id !== adminId && (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button size="sm" variant="ghost" className="h-7 text-xs text-red-500 hover:bg-red-500/10">
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent className="bg-slate-900 border-slate-700">
-                          <AlertDialogHeader>
-                            <AlertDialogTitle className="text-slate-100 text-red-400">⚠️ Delete User Account</AlertDialogTitle>
-                            <AlertDialogDescription className="text-slate-400">
-                              Permanently delete <strong className="text-slate-200">{user.name}</strong>&apos;s account and all their data? This is IRREVERSIBLE.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => onAction('delete_user', user.id)} className="bg-red-600 hover:bg-red-700 text-white">
-                              Delete Permanently
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-red-500 hover:bg-red-500/10"
+                        title="Delete User Account"
+                        onClick={() => onDeleteUser(user.id)}
+                        disabled={deleteSummaryLoading}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
                     )}
                   </div>
                 </td>
