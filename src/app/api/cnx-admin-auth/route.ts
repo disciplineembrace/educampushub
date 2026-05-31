@@ -5,7 +5,6 @@ import {
   generateOTP,
   storeOTP,
   verifyOTP,
-  sendOTP,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
   checkOTPVerifyAttempts,
@@ -108,8 +107,35 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP({ email, otpCode: otp, purpose: 'admin_login' })
 
-      // Send OTP via email (Brevo)
-      const sendResult = await sendOTP({ email, otp, purpose: 'admin_login', userName: user.name })
+      // Send OTP via Brevo Email - direct API call
+      let emailSent = false
+
+      const brevoKey = process.env.BREVO_API_KEY
+      if (brevoKey) {
+        try {
+          const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+              'api-key': brevoKey,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({
+              sender: { name: 'EduCampusHub', email: 'disciplineembrace@gmail.com' },
+              to: [{ email: email, name: user.name || email.split('@')[0] }],
+              subject: `Your EduCampusHub Verification Code: ${otp}`,
+              htmlContent: `<div style="font-family:Arial,sans-serif;text-align:center;padding:40px"><h2 style="color:#002868">EduCampusHub</h2><p style="font-size:15px">Hello ${user.name || ''},</p><p style="font-size:15px">You are logging into the EduCampusHub Admin Panel. Use the verification code below to complete your login:</p><p style="font-size:36px;font-weight:bold;color:#FF6600;letter-spacing:8px">${otp}</p><p style="font-size:13px;color:#666">This code expires in 5 minutes. Do not share it with anyone.</p><p style="font-size:14px;color:#666">If you didn't attempt this login, please secure your account immediately.</p></div>`,
+              textContent: `EduCampusHub Admin Login Verification Code: ${otp}. Expires in 5 minutes.`,
+            }),
+          })
+          const brevoData = await brevoResponse.json()
+          if (brevoResponse.ok && brevoData.messageId) {
+            emailSent = true
+          }
+        } catch (err) {
+          console.error('[OTP] Brevo API error:', err)
+        }
+      }
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
@@ -118,10 +144,9 @@ export async function POST(request: Request) {
       const maskedEmailAddress = maskEmail(email)
 
       // If email delivery failed, return error
-      if (!sendResult.emailSent) {
-        console.error(`[2FA] Email delivery failed for ${email}: ${sendResult.message}`)
+      if (!emailSent) {
         return NextResponse.json({
-          error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
+          error: `Failed to send OTP to ${maskedEmailAddress}. Please try again.`,
           emailError: true,
         }, { status: 503 })
       }
@@ -140,7 +165,6 @@ export async function POST(request: Request) {
         message: `OTP sent to ${maskedEmailAddress}`,
         maskedEmail: maskedEmailAddress,
         requiresOTP: true,
-        ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }
 

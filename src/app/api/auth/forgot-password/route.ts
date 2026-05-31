@@ -5,7 +5,6 @@ import {
   generateOTP,
   storeOTP,
   verifyOTP,
-  sendOTP,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
   maskEmail,
@@ -95,8 +94,35 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP({ email: sanitizedEmail, otpCode: otp, purpose: 'forgot_password' })
 
-      // Send OTP via Brevo email
-      const sendResult = await sendOTP({ email: sanitizedEmail, otp, purpose: 'forgot_password', userName: user.name })
+      // Send OTP via Brevo Email - direct API call
+      let emailSent = false
+
+      const brevoKey = process.env.BREVO_API_KEY
+      if (brevoKey) {
+        try {
+          const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+              'api-key': brevoKey,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({
+              sender: { name: 'EduCampusHub', email: 'disciplineembrace@gmail.com' },
+              to: [{ email: sanitizedEmail, name: user.name || sanitizedEmail.split('@')[0] }],
+              subject: `Your EduCampusHub Verification Code: ${otp}`,
+              htmlContent: `<div style="font-family:Arial,sans-serif;text-align:center;padding:40px"><h2 style="color:#002868">EduCampusHub</h2><p style="font-size:15px">Hello ${user.name || ''},</p><p style="font-size:15px">You requested to reset your password. Use the verification code below to proceed:</p><p style="font-size:36px;font-weight:bold;color:#FF6600;letter-spacing:8px">${otp}</p><p style="font-size:13px;color:#666">This code expires in 5 minutes. Do not share it with anyone.</p><p style="font-size:14px;color:#666">If you didn't request this, you can safely ignore this email.</p></div>`,
+              textContent: `EduCampusHub Password Reset Code: ${otp}. Expires in 5 minutes.`,
+            }),
+          })
+          const brevoData = await brevoResponse.json()
+          if (brevoResponse.ok && brevoData.messageId) {
+            emailSent = true
+          }
+        } catch (err) {
+          console.error('[OTP] Brevo API error:', err)
+        }
+      }
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
@@ -108,10 +134,9 @@ export async function POST(request: Request) {
       const current = forgotPasswordAttempts.get(ip) || { count: 0, lastAttempt: 0 }
       forgotPasswordAttempts.set(ip, { count: current.count + 1, lastAttempt: now })
 
-      if (!sendResult.emailSent) {
-        console.error(`[Forgot Password] Email delivery failed for ${sanitizedEmail}: ${sendResult.message}`)
+      if (!emailSent) {
         return NextResponse.json({
-          error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
+          error: `Failed to send OTP to ${maskedEmailAddress}. Please try again.`,
           emailError: true,
         }, { status: 503 })
       }
@@ -120,7 +145,6 @@ export async function POST(request: Request) {
         success: true,
         message: `OTP sent to ${maskedEmailAddress}`,
         maskedEmail: maskedEmailAddress,
-        ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }
 

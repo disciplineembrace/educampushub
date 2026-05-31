@@ -183,10 +183,6 @@ interface EmailOTPParams {
 }
 
 export async function sendOTPEmailViaBrevo(params: EmailOTPParams): Promise<SMSResult> {
-  console.log(`[OTP-DEBUG] sendOTPEmailViaBrevo called: email=${params.email}, purpose=${params.purpose}`)
-  console.log(`[OTP-DEBUG] BREVO_API_KEY exists: ${!!process.env.BREVO_API_KEY}, length: ${process.env.BREVO_API_KEY?.length || 0}`)
-  console.log(`[OTP-DEBUG] BREVO_API_KEY prefix: ${process.env.BREVO_API_KEY?.substring(0, 15) || 'none'}`)
-
   try {
     const result = await sendOTPEmail({
       to: params.email,
@@ -196,15 +192,13 @@ export async function sendOTPEmailViaBrevo(params: EmailOTPParams): Promise<SMSR
       expiryMinutes: OTP_EXPIRY_MINUTES,
     })
 
-    console.log(`[OTP-DEBUG] sendOTPEmail result: success=${result.success}, provider=${result.provider}, message=${result.message}`)
-
     return {
       success: result.success,
       message: result.message,
       provider: result.provider || 'Brevo',
     }
   } catch (error) {
-    console.error(`[OTP-DEBUG] sendOTPEmailViaBrevo error:`, error)
+    console.error('[OTP] sendOTPEmailViaBrevo error:', error)
     return {
       success: false,
       message: `Email error: ${(error as Error).message}`,
@@ -322,9 +316,8 @@ export function maskPhone(phone: string): string {
 
 // ─── Backward-compat: sendOTPSMS (now just logs — SMS removed) ───
 
-export async function sendOTPSMS(phone: string, otp: string): Promise<SMSResult> {
-  // SMS delivery removed. Log only.
-  console.log(`[OTP-SMS-REMOVED] Phone: ${phone}, OTP: ${otp} — SMS not sent (Fast2SMS removed). Use email OTP instead.`)
+export async function sendOTPSMS(_phone: string, _otp: string): Promise<SMSResult> {
+  // SMS delivery removed. Use email OTP instead.
   return {
     success: false,
     message: 'SMS service is no longer available. OTP sent via email.',

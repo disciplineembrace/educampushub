@@ -5,14 +5,12 @@ import {
   generateOTP,
   storeOTP,
   verifyOTP,
-  sendOTP,
   getAdminPhone,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
   maskEmail,
   maskPhone,
 } from '@/lib/otp-utils'
-import { sendOTPEmail } from '@/lib/brevo-email'
 
 // ─── Rate Limiting for forgot-password endpoint ───
 
@@ -84,21 +82,9 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP({ email, phone: user.phone || undefined, otpCode: otp, purpose: 'admin_forgot_password' })
 
-      // Send OTP via Brevo Email - direct API call to avoid any module issues
-      console.log(`[ADMIN-FORGOT-PW] Sending OTP to ${email}, purpose=admin_forgot_password`)
-      console.log(`[ADMIN-FORGOT-PW] BREVO_API_KEY exists: ${!!process.env.BREVO_API_KEY}, length: ${process.env.BREVO_API_KEY?.length || 0}`)
-      console.log(`[ADMIN-FORGOT-PW] BREVO_API_KEY prefix: ${process.env.BREVO_API_KEY?.substring(0, 15) || 'NONE'}`)
-      console.log(`[ADMIN-FORGOT-PW] BREVO_API_KEY raw type: ${typeof process.env.BREVO_API_KEY}`)
-      console.log(`[ADMIN-FORGOT-PW] RESEND_API_KEY exists: ${!!process.env.RESEND_API_KEY}, length: ${process.env.RESEND_API_KEY?.length || 0}`)
-      
-      // Debug: List all env keys
-      const allEnvKeys = Object.keys(process.env).filter(k => !k.includes('npm') && !k.includes('PATH')).sort()
-      console.log(`[ADMIN-FORGOT-PW] All env keys: ${allEnvKeys.join(', ')}`)
-      
+      // Send OTP via Brevo Email - direct API call
       let emailSent = false
-      let emailMessage = ''
       
-      // Try direct Brevo API call as primary method
       const brevoKey = process.env.BREVO_API_KEY
       if (brevoKey) {
         try {
@@ -118,23 +104,13 @@ export async function POST(request: Request) {
             }),
           })
           const brevoData = await brevoResponse.json()
-          console.log(`[ADMIN-FORGOT-PW] Brevo API response:`, JSON.stringify(brevoData))
-          
           if (brevoResponse.ok && brevoData.messageId) {
             emailSent = true
-            emailMessage = 'OTP sent to your email'
-          } else {
-            emailMessage = brevoData.message || 'Brevo API error'
           }
         } catch (err) {
-          emailMessage = `Brevo error: ${(err as Error).message}`
-          console.error(`[ADMIN-FORGOT-PW] Brevo API error:`, err)
+          console.error('[OTP] Brevo API error:', err)
         }
-      } else {
-        emailMessage = 'BREVO_API_KEY not found in environment'
-        console.error(`[ADMIN-FORGOT-PW] BREVO_API_KEY not available!`)
       }
-      const smsSent = false
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
@@ -154,12 +130,6 @@ export async function POST(request: Request) {
         maskedPhone,
         maskedEmail: maskEmail(email),
         emailSent,
-        smsSent,
-        _debug_otp: otp,
-        _debug_email_msg: emailMessage,
-        _debug_brevo_key_type: typeof process.env.BREVO_API_KEY,
-        _debug_brevo_key_len: process.env.BREVO_API_KEY?.length || 0,
-        _debug_brevo_key_prefix: process.env.BREVO_API_KEY?.substring(0, 15) || 'NONE',
       })
     }
 
