@@ -224,3 +224,34 @@ Stage Summary:
 - OTP Security: 5-min expiry, 1-min cooldown, 5/hr limit, 3 verify attempts
 - Rate Limiting: 15-min lockout after 5 failed login attempts
 - Database: Neon PostgreSQL connected via HTTP driver for serverless reliability
+
+---
+Task ID: premium-upload-system
+Agent: main
+Task: Build complete Premium & Normal Upload System for EduCampusHub
+
+Work Log:
+- Updated Prisma schema: Added premium plan fields to User model (planType, premiumActive, premiumBooksUsed, premiumBookLimit, premiumExpiryDate, premiumPurchaseDate), state/district fields, uploadType to Listing, paymentType to Payment, new SiteConfig model for UPI config
+- Updated payment API (/api/payment): GET returns premium status, POST supports paymentType='premium_plan' for ₹149, UPI from SiteConfig
+- Updated listings API: Premium upload logic (free/paid/premium credits), premium listings sorted first
+- Updated admin API: approve_payment handles premium activation, added toggle_premium, update_upi, revenue_analytics actions
+- Created PricingPage component: Normal/Premium plan cards, FAQ, comparison table, current plan status banner
+- Created PremiumPlanModal component: ₹149 payment flow with QR code, UTR/screenshot submission
+- Created FeaturedSellers component: Premium sellers section on homepage with gold badges
+- Created /api/premium-sellers route: Fetches premium sellers ordered by rating
+- Updated FeaturedListings: Gold ring border for premium, Crown badge for premium listings
+- Updated ExplorePage: Premium gold border + Crown badge on listing cards, State/District filters
+- Updated SellProductPage: Premium status banner with Crown icon, premium/paid buttons
+- Updated ProfilePage: Premium badge next to user name
+- Updated ProductDetailPage: Premium seller badge on seller info
+- Updated Navbar: Added Pricing link with Crown icon
+- Updated store: Added premium fields to User interface, 'pricing' page type
+- Resolved merge conflicts during git rebase
+- Pushed to GitHub and deployed to Vercel (dpl_8SM9owJdLFFn6ZKFaynP58gST4V2)
+
+Stage Summary:
+- Complete Premium & Normal upload system implemented and deployed
+- Normal Plan: First 5 uploads free, then ₹10 per upload
+- Premium Plan: ₹149 for 29 uploads, premium badge, search priority, featured seller
+- Admin can: toggle premium, configure UPI ID, view revenue analytics
+- Live site: https://educampushub-beta.vercel.app
