@@ -485,6 +485,58 @@ export const translations: Record<string, unknown> = {
     forgotPassword: 'पासवर्ड भूल गए?',
   },
 
+  // ===================== FORGOT PASSWORD =====================
+  forgotPassword: {
+    title: 'पासवर्ड रीसेट करें',
+    subtitle: 'वेरिफिकेशन कोड प्राप्त करने के लिए अपना पंजीकृत मोबाइल नंबर दर्ज करें',
+    verifyTitle: 'OTP सत्यापित करें',
+    verifySubtitle: '{phone} पर भेजा गया 6-अंकों का कोड दर्ज करें',
+    resetTitle: 'नया पासवर्ड बनाएं',
+    resetSubtitle: 'आपकी पहचान सत्यापित हो गई है। एक नया सुरक्षित पासवर्ड सेट करें।',
+    successTitle: 'पासवर्ड अपडेट हो गया!',
+    successSubtitle: 'आपका पासवर्ड सफलतापूर्वक रीसेट कर दिया गया है।',
+    successMessage: 'पासवर्ड सफलतापूर्वक अपडेट हो गया। कृपया अपने नए पासवर्ड से लॉगिन करें।',
+    backToLogin: 'लॉगिन पर वापस जाएं',
+    step1: 'मोबाइल',
+    step2: 'सत्यापन',
+    step3: 'रीसेट',
+    label: {
+      phone: 'पंजीकृत मोबाइल नंबर',
+      otp: '6-अंकों का OTP दर्ज करें',
+      newPassword: 'नया पासवर्ड',
+      confirmPassword: 'नए पासवर्ड की पुष्टि करें',
+    },
+    placeholder: {
+      phone: '+91 98765 43210',
+      newPassword: 'नया पासवर्ड दर्ज करें',
+      confirmPassword: 'नए पासवर्ड की पुष्टि करें',
+    },
+    phoneHint: 'अपने EduCampusHub खाते से जुड़ा 10-अंकों का मोबाइल नंबर दर्ज करें।',
+    otpHint: 'आपके पंजीकृत नंबर पर SMS द्वारा 6-अंकों का कोड भेजा गया है।',
+    passwordStrength: 'शामिल होना चाहिए: 8+ अक्षर, बड़े अक्षर, छोटे अक्षर, अंक और विशेष अक्षर',
+    resendIn: '{seconds} सेकंड में OTP फिर से भेजें',
+    resendOtp: 'OTP फिर से भेजें',
+    button: {
+      sendOtp: 'OTP भेजें',
+      sending: 'OTP भेजा जा रहा है...',
+      verifyOtp: 'OTP सत्यापित करें',
+      verifying: 'सत्यापित किया जा रहा है...',
+      resetPassword: 'पासवर्ड रीसेट करें',
+      resetting: 'रीसेट किया जा रहा है...',
+      goToLogin: 'लॉगिन करें',
+    },
+    error: {
+      phoneRequired: 'मोबाइल नंबर आवश्यक है',
+      phoneInvalid: 'कृपया मान्य 10-अंकों का भारतीय मोबाइल नंबर दर्ज करें',
+      otpRequired: 'OTP आवश्यक है',
+      otpInvalid: 'अमान्य OTP। कृपया जांचें और पुनः प्रयास करें।',
+      passwordRequired: 'नया पासवर्ड आवश्यक है',
+      sendFailed: 'OTP भेजने में विफल। कृपया पुनः प्रयास करें।',
+      resetFailed: 'पासवर्ड रीसेट करने में विफल। कृपया पुनः प्रयास करें।',
+      wentWrong: 'कुछ गलत हो गया। कृपया पुनः प्रयास करें।',
+    },
+  },
+
   // ===================== MOBILE NAV =====================
   mobileNav: {
     home: 'होम', categories: 'कैटेगरी', sell: 'बेचें', reader: 'रीडर', dashboard: 'डैशबोर्ड',

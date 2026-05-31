@@ -769,6 +769,58 @@ export const translations: Record<string, unknown> = {
     forgotPassword: 'Forgot password?',
   },
 
+  // ===================== FORGOT PASSWORD =====================
+  forgotPassword: {
+    title: 'Reset Password',
+    subtitle: 'Enter your registered mobile number to receive a verification code',
+    verifyTitle: 'Verify OTP',
+    verifySubtitle: 'Enter the 6-digit code sent to {phone}',
+    resetTitle: 'Create New Password',
+    resetSubtitle: 'Your identity is verified. Set a new secure password.',
+    successTitle: 'Password Updated!',
+    successSubtitle: 'Your password has been successfully reset.',
+    successMessage: 'Password updated successfully. Please log in with your new password.',
+    backToLogin: 'Back to login',
+    step1: 'Phone',
+    step2: 'Verify',
+    step3: 'Reset',
+    label: {
+      phone: 'Registered Mobile Number',
+      otp: 'Enter 6-digit OTP',
+      newPassword: 'New Password',
+      confirmPassword: 'Confirm New Password',
+    },
+    placeholder: {
+      phone: '+91 98765 43210',
+      newPassword: 'Enter new password',
+      confirmPassword: 'Confirm new password',
+    },
+    phoneHint: 'Enter the 10-digit mobile number linked to your EduCampusHub account.',
+    otpHint: 'A 6-digit code has been sent via SMS to your registered number.',
+    passwordStrength: 'Must include: 8+ characters, uppercase, lowercase, number, and special character',
+    resendIn: 'Resend OTP in {seconds}s',
+    resendOtp: 'Resend OTP',
+    button: {
+      sendOtp: 'Send OTP',
+      sending: 'Sending OTP...',
+      verifyOtp: 'Verify OTP',
+      verifying: 'Verifying...',
+      resetPassword: 'Reset Password',
+      resetting: 'Resetting...',
+      goToLogin: 'Go to Login',
+    },
+    error: {
+      phoneRequired: 'Mobile number is required',
+      phoneInvalid: 'Please enter a valid 10-digit Indian mobile number',
+      otpRequired: 'OTP is required',
+      otpInvalid: 'Invalid OTP. Please check and try again.',
+      passwordRequired: 'New password is required',
+      sendFailed: 'Failed to send OTP. Please try again.',
+      resetFailed: 'Failed to reset password. Please try again.',
+      wentWrong: 'Something went wrong. Please try again.',
+    },
+  },
+
   // ===================== MOBILE NAV (page.tsx) =====================
   mobileNav: {
     home: 'Home',

@@ -710,6 +710,58 @@ export const translations: Record<string, unknown> = {
     forgotPassword: 'પાસવર્ડ ભૂલી ગયા?',
   },
 
+  // ===================== FORGOT PASSWORD =====================
+  forgotPassword: {
+    title: 'પાસવર્ડ રીસેટ કરો',
+    subtitle: 'ચકાસણી કોડ મેળવવા તમારો નોંધાયેલ મોબાઇલ નંબર દાખલ કરો',
+    verifyTitle: 'OTP ચકાસો',
+    verifySubtitle: '{phone} પર મોકલેલો 6-અંકનો કોડ દાખલ કરો',
+    resetTitle: 'નવો પાસવર્ડ બનાવો',
+    resetSubtitle: 'તમારી ઓળખ ચકાસાય છે. નવો સુરક્ષિત પાસવર્ડ સેટ કરો.',
+    successTitle: 'પાસવર્ડ અપડેટ થયો!',
+    successSubtitle: 'તમારો પાસવર્ડ સફળતાપૂર્વક રીસેટ કરવામાં આવ્યો છે.',
+    successMessage: 'પાસવર્ડ સફળતાપૂર્વક અપડેટ થયો. કૃપા કરીને તમારા નવા પાસવર્ડ વડે લૉગિન કરો.',
+    backToLogin: 'લૉગિન પર પાછા જાઓ',
+    step1: 'મોબાઇલ',
+    step2: 'ચકાસણી',
+    step3: 'રીસેટ',
+    label: {
+      phone: 'નોંધાયેલ મોબાઇલ નંબર',
+      otp: '6-અંકનો OTP દાખલ કરો',
+      newPassword: 'નવો પાસવર્ડ',
+      confirmPassword: 'નવા પાસવર્ડની ખાતરી કરો',
+    },
+    placeholder: {
+      phone: '+91 98765 43210',
+      newPassword: 'નવો પાસવર્ડ દાખલ કરો',
+      confirmPassword: 'નવા પાસવર્ડની ખાતરી કરો',
+    },
+    phoneHint: 'તમારા EduCampusHub એકાઉન્ટ સાથે જોડાયેલ 10-અંકનો મોબાઇલ નંબર દાખલ કરો.',
+    otpHint: 'તમારા નોંધાયેલ નંબર પર SMS દ્વારા 6-અંકનો કોડ મોકલવામાં આવ્યો છે.',
+    passwordStrength: 'સમાવિષ્ટ હોવું જોઈએ: 8+ અક્ષરો, મોટા અક્ષરો, નાના અક્ષરો, અંક અને વિશેષ અક્ષર',
+    resendIn: '{seconds} સેકન્ડમાં OTP ફરીથી મોકલો',
+    resendOtp: 'OTP ફરીથી મોકલો',
+    button: {
+      sendOtp: 'OTP મોકલો',
+      sending: 'OTP મોકલા રહ્યો છે...',
+      verifyOtp: 'OTP ચકાસો',
+      verifying: 'ચકાસણી થઈ રહી છે...',
+      resetPassword: 'પાસવર્ડ રીસેટ કરો',
+      resetting: 'રીસેટ થઈ રહ્યું છે...',
+      goToLogin: 'લૉગિન કરો',
+    },
+    error: {
+      phoneRequired: 'મોબાઇલ નંબર જરૂરી છે',
+      phoneInvalid: 'કૃપા કરીને માન્ય 10-અંકનો ભારતીય મોબાઇલ નંબર દાખલ કરો',
+      otpRequired: 'OTP જરૂરી છે',
+      otpInvalid: 'અમાન્ય OTP. કૃપા કરીને તપાસો અને ફરી પ્રયાસ કરો.',
+      passwordRequired: 'નવો પાસવર્ડ જરૂરી છે',
+      sendFailed: 'OTP મોકલવામાં નિષ્ફળ. કૃપા કરીને ફરી પ્રયાસ કરો.',
+      resetFailed: 'પાસવર્ડ રીસેટ કરવામાં નિષ્ફળ. કૃપા કરીને ફરી પ્રયાસ કરો.',
+      wentWrong: 'કંઈક ખોટું થયું. કૃપા કરીને ફરી પ્રયાસ કરો.',
+    },
+  },
+
   // ===================== MOBILE NAV =====================
   mobileNav: {
     home: 'હોમ',

@@ -222,3 +222,18 @@ export async function getAdminPhone(email: string): Promise<string | null> {
     return null
   }
 }
+
+// ─── Get User by Phone Number ───
+
+export async function getUserByPhone(phone: string): Promise<{ id: string; email: string; name: string; phone: string; isBanned: boolean; passwordHash: string | null } | null> {
+  try {
+    const sql = getNeonSql()
+    const result = await sql`
+      SELECT id, email, name, phone, "isBanned", "passwordHash" FROM "User" WHERE phone = ${phone} LIMIT 1
+    `
+    if (!result || result.length === 0) return null
+    return result[0] as { id: string; email: string; name: string; phone: string; isBanned: boolean; passwordHash: string | null }
+  } catch {
+    return null
+  }
+}
