@@ -361,10 +361,48 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
         }
       }
 
-      console.error(`[Fast2SMS] All routes failed. OTP: ${JSON.stringify(otpData)}, T: ${JSON.stringify(tData)}, Q: ${JSON.stringify(qData)}`)
+      console.warn(`[Fast2SMS] Quick route also failed: ${JSON.stringify(qData)}`)
+
+      // ─── Attempt 5: V1 Bulk API (legacy, may work without verification) ───
+      console.log(`[Fast2SMS] Trying legacy V1 bulk API`)
+
+      try {
+        const v1Response = await fetch('https://www.fast2sms.com/dev/bulk', {
+          method: 'POST',
+          headers: {
+            'authorization': apiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sender_id: 'FSTSMS',
+            message: `Your EduCampusHub OTP is ${otp}. Do not share with anyone.`,
+            language: 'english',
+            route: 'p',
+            numbers: normalizedPhone,
+          }),
+        })
+
+        const v1Data = await v1Response.json()
+
+        if (v1Data.return === true) {
+          console.log(`[Fast2SMS] V1 route sent successfully to ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)}`)
+          return {
+            success: true,
+            message: 'OTP sent successfully via Fast2SMS (V1)',
+            provider: 'Fast2SMS',
+            deliveryId: v1Data.request_id || undefined,
+          }
+        }
+
+        console.warn(`[Fast2SMS] V1 route also failed: ${JSON.stringify(v1Data)}`)
+      } catch (v1Error: any) {
+        console.warn(`[Fast2SMS] V1 route error: ${v1Error.message}`)
+      }
+
+      console.error(`[Fast2SMS] All routes failed for ${normalizedPhone}`)
       return {
         success: false,
-        message: `Fast2SMS delivery failed. Please complete Fast2SMS account setup: 1) Verify website on OTP Message menu, or 2) Complete one transaction of ₹100+ for Quick route. Error: ${otpData.message}`,
+        message: `Fast2SMS delivery failed. Your Fast2SMS account needs setup: 1) Go to fast2sms.com → OTP Message menu → Verify website, OR 2) Add ₹100+ balance for transactional routes. Current errors: OTP route: ${otpData.message}. Quick route needs ₹100 transaction.`,
         provider: 'Fast2SMS',
         error: JSON.stringify({ otpRoute: otpData, transRoute: tData, quickRoute: qData }),
       }
