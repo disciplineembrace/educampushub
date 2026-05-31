@@ -33,6 +33,7 @@ export async function GET(request: Request) {
     const board = searchParams.get('board')
     const standard = searchParams.get('standard')
     const isDigital = searchParams.get('isDigital')
+    const sellerId = searchParams.get('sellerId')
 
     const where: Record<string, unknown> = { isSold: false }
 
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
     if (board && board !== 'all') where.board = board
     if (standard && standard !== 'all') where.standard = standard
     if (isDigital === 'true') where.isDigital = true
+    if (sellerId) where.sellerId = sellerId
     if (search) {
       where.OR = [
         { title: { contains: search } },
@@ -215,15 +217,51 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json()
-    const { id, ...updates } = body
+    const { id, sellerId, ...updates } = body
 
     if (!id) {
       return NextResponse.json({ error: 'Listing ID required' }, { status: 400 })
     }
 
+    // Verify the listing exists
+    const existingListing = await db.listing.findUnique({ where: { id } })
+    if (!existingListing) {
+      return NextResponse.json({ error: 'Listing not found' }, { status: 404 })
+    }
+
+    // Ownership check: sellerId must match the listing's sellerId
+    // If no sellerId provided, deny access
+    if (!sellerId) {
+      return NextResponse.json({ error: 'Authentication required. Please provide sellerId.' }, { status: 401 })
+    }
+
+    if (existingListing.sellerId !== sellerId) {
+      return NextResponse.json({ error: 'You can only edit your own listings.' }, { status: 403 })
+    }
+
+    // Whitelist allowed update fields for regular users
+    const allowedFields = ['title', 'description', 'originalPrice', 'sellingPrice', 'category', 'subcategory', 'listingType', 'course', 'semester', 'standard', 'board', 'college', 'city', 'condition', 'whatsappNumber', 'images', 'isSold', 'isDigital', 'fileUrl']
+    const sanitizedUpdates: Record<string, unknown> = {}
+    for (const key of allowedFields) {
+      if (updates[key] !== undefined) {
+        sanitizedUpdates[key] = updates[key]
+      }
+    }
+
+    // Sanitize text fields
+    if (sanitizedUpdates.title) sanitizedUpdates.title = String(sanitizedUpdates.title).trim()
+    if (sanitizedUpdates.description) sanitizedUpdates.description = String(sanitizedUpdates.description).trim()
+    if (sanitizedUpdates.whatsappNumber) {
+      const whatsapp = String(sanitizedUpdates.whatsappNumber).replace(/\s/g, '')
+      if (!/^\d{10}$/.test(whatsapp)) {
+        return NextResponse.json({ error: 'Invalid WhatsApp number format' }, { status: 400 })
+      }
+      sanitizedUpdates.whatsappNumber = whatsapp
+    }
+
     const listing = await db.listing.update({
       where: { id },
-      data: updates,
+      data: sanitizedUpdates,
     })
 
     return NextResponse.json({ listing })
@@ -237,9 +275,24 @@ export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
+    const sellerId = searchParams.get('sellerId')
 
     if (!id) {
       return NextResponse.json({ error: 'Listing ID required' }, { status: 400 })
+    }
+
+    if (!sellerId) {
+      return NextResponse.json({ error: 'Authentication required. Please provide sellerId.' }, { status: 401 })
+    }
+
+    // Verify the listing exists and belongs to the user
+    const existingListing = await db.listing.findUnique({ where: { id } })
+    if (!existingListing) {
+      return NextResponse.json({ error: 'Listing not found' }, { status: 404 })
+    }
+
+    if (existingListing.sellerId !== sellerId) {
+      return NextResponse.json({ error: 'You can only delete your own listings.' }, { status: 403 })
     }
 
     await db.wishlist.deleteMany({ where: { listingId: id } })

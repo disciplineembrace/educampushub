@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { User, Star, BookOpen, Heart, Settings, BadgeCheck, MapPin, GraduationCap, Mail, Phone, ArrowLeft, CreditCard, CheckCircle, Clock, XCircle } from 'lucide-react'
-import { useAppStore, formatINR, CATEGORIES, parseListingImages } from '@/lib/store'
+import { User, Star, BookOpen, Heart, Settings, BadgeCheck, MapPin, GraduationCap, Mail, Phone, ArrowLeft, CreditCard, CheckCircle, Clock, XCircle, Pencil, Trash2, Loader2, MoreVertical, Eye } from 'lucide-react'
+import { useAppStore, formatINR, CATEGORIES, parseListingImages, type EditingListingData } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
@@ -12,10 +12,26 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { INDIAN_CITIES } from '@/lib/store'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { toast } from 'sonner'
 
 interface UserListing {
   id: string
   title: string
+  description: string
   sellingPrice: number
   originalPrice: number
   category: string
@@ -24,10 +40,21 @@ interface UserListing {
   isSold: boolean
   views: number
   images: string
+  listingType?: string
+  course?: string | null
+  semester?: string | null
+  college?: string | null
+  whatsappNumber?: string
+  subcategory?: string | null
+  standard?: string | null
+  board?: string | null
+  isDigital?: boolean
+  fileUrl?: string | null
+  seller?: { id: string }
 }
 
 export default function ProfilePage() {
-  const { currentUser, setCurrentPage, setCurrentUser, setSelectedProductId, wishlist } = useAppStore()
+  const { currentUser, setCurrentPage, setCurrentUser, setSelectedProductId, wishlist, setEditingListing } = useAppStore()
   const [myListings, setMyListings] = useState<UserListing[]>([])
   const [wishlistListings, setWishlistListings] = useState<UserListing[]>([])
   const [payments, setPayments] = useState<{ id: string; amount: number; status: string; utrNumber: string | null; createdAt: string; verifiedAt: string | null }[]>([])
@@ -35,6 +62,9 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({ name: '', college: '', city: '', phone: '', whatsapp: '' })
   const [saving, setSaving] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingListingId, setDeletingListingId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!currentUser) return
@@ -50,12 +80,12 @@ export default function ProfilePage() {
       setLoading(true)
       try {
         const [listingsRes, paymentsRes] = await Promise.all([
-          fetch('/api/listings?limit=50'),
+          fetch(`/api/listings?limit=50&sellerId=${currentUser.id}`),
           fetch(`/api/payment/history?userId=${currentUser.id}`),
         ])
         const listingsData = await listingsRes.json()
         const allListings = listingsData.listings || []
-        setMyListings(allListings.filter((l: UserListing & { seller: { id: string } }) => l.seller?.id === currentUser.id))
+        setMyListings(allListings)
         setWishlistListings(allListings.filter((l: UserListing & { id: string }) => wishlist.includes(l.id)))
         
         if (paymentsRes.ok) {
@@ -87,6 +117,61 @@ export default function ProfilePage() {
       console.error('Save error:', err)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleEditListing = (listing: UserListing, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    const editingData: EditingListingData = {
+      id: listing.id,
+      title: listing.title,
+      description: listing.description,
+      originalPrice: listing.originalPrice,
+      sellingPrice: listing.sellingPrice,
+      category: listing.category,
+      subcategory: listing.subcategory || null,
+      listingType: listing.listingType || 'sell',
+      course: listing.course || null,
+      semester: listing.semester || null,
+      standard: listing.standard || null,
+      board: listing.board || null,
+      college: listing.college || null,
+      city: listing.city,
+      condition: listing.condition,
+      whatsappNumber: listing.whatsappNumber || '',
+      images: listing.images,
+      isDigital: listing.isDigital || false,
+      fileUrl: listing.fileUrl || null,
+    }
+    setEditingListing(editingData)
+    setCurrentPage('editListing')
+  }
+
+  const handleDeleteListing = (listingId: string) => {
+    setDeletingListingId(listingId)
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!currentUser || !deletingListingId) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/listings?id=${deletingListingId}&sellerId=${currentUser.id}`, {
+        method: 'DELETE',
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Listing deleted successfully!')
+        setMyListings(prev => prev.filter(l => l.id !== deletingListingId))
+      } else {
+        toast.error(data.error || 'Failed to delete listing')
+      }
+    } catch {
+      toast.error('Network error. Please try again.')
+    } finally {
+      setDeleting(false)
+      setDeleteDialogOpen(false)
+      setDeletingListingId(null)
     }
   }
 
@@ -223,27 +308,73 @@ export default function ProfilePage() {
                 </Button>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="space-y-3">
                 {myListings.map(listing => {
                   const lcat = CATEGORIES.find(c => c.id === listing.category)
                   const listingImgs = parseListingImages(listing.images)
                   return (
                     <Card
                       key={listing.id}
-                      className="overflow-hidden cursor-pointer hover:shadow-md transition-all card-premium"
-                      onClick={() => { setSelectedProductId(listing.id); setCurrentPage('product') }}
+                      className="overflow-hidden card-premium"
                     >
-                      <div className={`aspect-[4/3] ${listingImgs.length > 0 ? '' : `bg-gradient-to-br ${lcat?.color || 'from-gray-400 to-gray-500'} flex items-center justify-center`} relative`}>
-                        {listingImgs.length > 0 ? (
-                          <img src={listingImgs[0]} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
-                        ) : (
-                          <BookOpen className="w-8 h-8 text-white/50" />
-                        )}
-                        {listing.isSold && <Badge className="absolute bg-gray-500 text-white border-0 rounded-full">Sold</Badge>}
-                      </div>
-                      <div className="p-3">
-                        <h4 className="text-sm font-medium line-clamp-1">{listing.title}</h4>
-                        <p className="text-base font-bold text-brand mt-1">{formatINR(listing.sellingPrice)}</p>
+                      <div className="flex">
+                        {/* Image */}
+                        <div
+                          className={`w-28 sm:w-36 shrink-0 aspect-[4/3] ${listingImgs.length > 0 ? '' : `bg-gradient-to-br ${lcat?.color || 'from-gray-400 to-gray-500'} flex items-center justify-center`} relative cursor-pointer`}
+                          onClick={() => { setSelectedProductId(listing.id); setCurrentPage('product') }}
+                        >
+                          {listingImgs.length > 0 ? (
+                            <img src={listingImgs[0]} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
+                          ) : (
+                            <BookOpen className="w-8 h-8 text-white/50" />
+                          )}
+                          {listing.isSold && <Badge className="absolute top-2 left-2 bg-gray-500 text-white border-0 rounded-full text-[10px]">Sold</Badge>}
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 p-3 sm:p-4 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div
+                              className="flex-1 min-w-0 cursor-pointer"
+                              onClick={() => { setSelectedProductId(listing.id); setCurrentPage('product') }}
+                            >
+                              <h4 className="text-sm font-semibold line-clamp-1 hover:text-brand transition-colors">{listing.title}</h4>
+                              <div className="flex items-baseline gap-2 mt-1">
+                                <span className="text-base font-bold text-brand">{formatINR(listing.sellingPrice)}</span>
+                                {listing.originalPrice > 0 && (
+                                  <span className="text-xs text-muted-foreground line-through">{formatINR(listing.originalPrice)}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <Badge variant="secondary" className="text-[10px] rounded-full px-1.5 py-0">{listing.condition}</Badge>
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Eye className="w-3 h-3" />{listing.views}</span>
+                                {lcat && <span className="text-[10px] text-muted-foreground">{lcat.name}</span>}
+                              </div>
+                            </div>
+
+                            {/* Edit & Delete Actions */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEditListing(listing)}
+                                className="h-8 w-8 rounded-lg text-muted-foreground hover:text-brand hover:bg-brand/10"
+                                title="Edit listing"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteListing(listing.id)}
+                                className="h-8 w-8 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
+                                title="Delete listing"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </Card>
                   )
@@ -271,7 +402,7 @@ export default function ProfilePage() {
                       className="overflow-hidden cursor-pointer hover:shadow-md transition-all card-premium"
                       onClick={() => { setSelectedProductId(listing.id); setCurrentPage('product') }}
                     >
-                      <div className={`aspect-[4/3] ${listingImgs.length > 0 ? '' : `bg-gradient-to-br ${lcat?.color || 'from-gray-400 to-gray-500'} flex items-center justify-center`}`}>
+                      <div className={`aspect-[4/3] ${listingImgs.length > 0 ? '' : `bg-gradient-to-br ${lcat?.color || 'from-gray-400 to-gray-500'} flex items-center justify-center'}`}>
                         {listingImgs.length > 0 ? (
                           <img src={listingImgs[0]} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
                         ) : (
@@ -334,6 +465,27 @@ export default function ProfilePage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Listing</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this listing? This action cannot be undone. All data including images, views, and wishlist entries will be permanently removed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting} className="rounded-xl gap-2">
+              {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Delete Permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

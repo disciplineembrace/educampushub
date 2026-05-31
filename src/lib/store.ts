@@ -22,7 +22,29 @@ export interface User {
   adminRole?: string | null
 }
 
-export type PageType = 'home' | 'explore' | 'product' | 'sell' | 'login' | 'profile' | 'wishlist' | 'terms' | 'privacy' | 'reader' | 'dashboard' | 'saved' | 'categories'
+export type PageType = 'home' | 'explore' | 'product' | 'sell' | 'login' | 'profile' | 'wishlist' | 'terms' | 'privacy' | 'reader' | 'dashboard' | 'saved' | 'categories' | 'editListing'
+
+export interface EditingListingData {
+  id: string
+  title: string
+  description: string
+  originalPrice: number
+  sellingPrice: number
+  category: string
+  subcategory: string | null
+  listingType: string
+  course: string | null
+  semester: string | null
+  standard: string | null
+  board: string | null
+  college: string | null
+  city: string
+  condition: string
+  whatsappNumber: string
+  images: string
+  isDigital: boolean
+  fileUrl: string | null
+}
 
 interface AppState {
   currentPage: PageType
@@ -31,6 +53,8 @@ interface AppState {
   setSelectedProductId: (id: string | null) => void
   currentUser: User | null
   setCurrentUser: (user: User | null) => void
+  editingListing: EditingListingData | null
+  setEditingListing: (listing: EditingListingData | null) => void
   darkMode: boolean
   toggleDarkMode: () => void
   searchQuery: string
@@ -62,6 +86,8 @@ export const useAppStore = create<AppState>()(
       setSelectedProductId: (id: string | null) => set({ selectedProductId: id }),
       currentUser: null,
       setCurrentUser: (user: User | null) => set({ currentUser: user }),
+      editingListing: null,
+      setEditingListing: (listing: EditingListingData | null) => set({ editingListing: listing }),
       darkMode: false,
       toggleDarkMode: () => {
         const newMode = !get().darkMode
@@ -126,6 +152,7 @@ export const useAppStore = create<AppState>()(
         savedMaterials: state.savedMaterials,
         bookmarks: state.bookmarks,
         readingProgress: state.readingProgress,
+        // Note: editingListing is NOT persisted - it's transient navigation state
       }),
     }
   )
