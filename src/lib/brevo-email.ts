@@ -21,8 +21,10 @@ const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
 const SENDER_NAME = () => process.env.EMAIL_FROM_NAME || 'EduCampusHub'
 
 // Default sender emails per provider
+// Brevo: Must use a verified sender email in Brevo account
+// Resend: Uses onboarding@resend.dev by default (for testing), or custom domain
 const RESEND_SENDER_EMAIL = () => process.env.EMAIL_FROM || 'onboarding@resend.dev'
-const BREVO_SENDER_EMAIL = () => process.env.EMAIL_FROM || 'noreply@educampushub.in'
+const BREVO_SENDER_EMAIL = () => process.env.EMAIL_FROM || 'disciplineembrace@gmail.com'
 
 // ─── Types ───
 
