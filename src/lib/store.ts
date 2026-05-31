@@ -20,9 +20,14 @@ export interface User {
   totalBooksUploaded?: number
   mustChangePassword?: boolean
   adminRole?: string | null
+  planType?: string
+  premiumActive?: boolean
+  premiumBookLimit?: number
+  premiumBooksUsed?: number
+  premiumExpiryDate?: string | null
 }
 
-export type PageType = 'home' | 'explore' | 'product' | 'sell' | 'login' | 'profile' | 'wishlist' | 'terms' | 'privacy' | 'reader' | 'dashboard' | 'saved' | 'categories' | 'editListing'
+export type PageType = 'home' | 'explore' | 'product' | 'sell' | 'login' | 'profile' | 'wishlist' | 'terms' | 'privacy' | 'reader' | 'dashboard' | 'saved' | 'categories' | 'editListing' | 'pricing'
 
 export interface EditingListingData {
   id: string

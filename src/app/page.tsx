@@ -27,6 +27,9 @@ import LearningDashboard from '@/components/campus/LearningDashboard'
 import SavedMaterialsPage from '@/components/campus/SavedMaterialsPage'
 import EditListingPage from '@/components/campus/EditListingPage'
 import CategoryExplorerPage from '@/components/campus/CategoryExplorerPage'
+import PricingPage from '@/components/campus/PricingPage'
+import PremiumDashboard from '@/components/campus/PremiumDashboard'
+import FeaturedSellerCarousel from '@/components/campus/FeaturedSellerCarousel'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
 
 function HomePage() {
@@ -34,6 +37,7 @@ function HomePage() {
     <div>
       <HeroSection />
       <CategoriesSection />
+      <FeaturedSellerCarousel />
       <FeaturedListings />
       <WhyChooseSection />
       <TestimonialsSection />
@@ -54,10 +58,11 @@ const PAGE_COMPONENTS: Record<PageType, React.ComponentType> = {
   terms: TermsPage,
   privacy: PrivacyPage,
   reader: BookReaderPage,
-  dashboard: LearningDashboard,
+  dashboard: PremiumDashboard,
   saved: SavedMaterialsPage,
   categories: CategoryExplorerPage,
   editListing: EditListingPage,
+  pricing: PricingPage,
 }
 
 function MobileBottomNav({ navItems }: { navItems: { icon: React.ElementType; label: string; page: PageType; isCenter?: boolean }[] }) {

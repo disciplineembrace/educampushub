@@ -71,6 +71,8 @@ interface UserItem {
   adminRole: string | null
   rating: number
   totalSales: number
+  planType?: string
+  premiumActive?: boolean
   createdAt: string
   _count: { listings: number }
 }
@@ -137,6 +139,7 @@ interface PaymentItem {
   userId: string
   amount: number
   paymentMethod: string
+  paymentType: string
   utrNumber: string | null
   screenshotUrl: string | null
   upiId: string | null
@@ -239,6 +242,9 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [revenueData, setRevenueData] = useState<{ totalRevenue: number; uploadFeeRevenue: number; premiumRevenue: number; premiumUsers: number; pendingPayments: number } | null>(null)
+  const [upiConfig, setUpiConfig] = useState<string>('')
+  const [upiSaving, setUpiSaving] = useState(false)
 
   // Modal states
   const [showListingModal, setShowListingModal] = useState(false)
@@ -302,7 +308,17 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   }, [admin, activeTab, fetchAuditLogs])
 
   useEffect(() => {
-    if (admin && activeTab === 'payments') fetchPayments()
+    if (admin && activeTab === 'payments') {
+      fetchPayments()
+      // Fetch revenue analytics
+      fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'revenue_analytics', targetId: 'default' }),
+      }).then(res => res.json()).then(data => {
+        if (data.totalRevenue !== undefined) setRevenueData(data)
+      }).catch(() => {})
+    }
   }, [admin, activeTab, fetchPayments])
 
   // Admin actions
@@ -669,7 +685,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
                 <AuditTab logs={auditLogs} loading={loading} />
               )}
               {activeTab === 'payments' && (
-                <PaymentsTab payments={filteredPayments} loading={loading} onAction={adminAction} />
+                <PaymentsTab payments={filteredPayments} loading={loading} onAction={adminAction} revenueData={revenueData} />
               )}
             </motion.div>
           </AnimatePresence>
@@ -1596,6 +1612,7 @@ function UsersTab({ users, loading, onAction, onOpenUser, adminId }: { users: Us
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="text-slate-200 font-medium truncate">{user.name}</span>
+                        {user.premiumActive && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
                         {user.isVerified && <BadgeCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                       </div>
                       <p className="text-xs text-slate-500 truncate">{user.email}</p>
@@ -1606,9 +1623,10 @@ function UsersTab({ users, loading, onAction, onOpenUser, adminId }: { users: Us
                 <td className="py-2.5 px-3 text-slate-300 font-mono hidden lg:table-cell">{user._count.listings}</td>
                 <td className="py-2.5 px-3">
                   <div className="flex gap-1 flex-wrap">
+                    {user.premiumActive && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-[10px] rounded-full gap-0.5"><Crown className="w-2.5 h-2.5" />Premium</Badge>}
                     {user.isAdmin && <RoleBadge role={user.adminRole || 'support_admin'} />}
                     {user.isBanned && <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-[10px] rounded-full">Banned</Badge>}
-                    {!user.isBanned && !user.isAdmin && <Badge className="bg-slate-700/50 text-slate-400 border-slate-700 text-[10px] rounded-full">Active</Badge>}
+                    {!user.isBanned && !user.isAdmin && !user.premiumActive && <Badge className="bg-slate-700/50 text-slate-400 border-slate-700 text-[10px] rounded-full">Active</Badge>}
                   </div>
                 </td>
                 <td className="py-2.5 px-3">
@@ -1672,6 +1690,33 @@ function UsersTab({ users, loading, onAction, onOpenUser, adminId }: { users: Us
                         </AlertDialogContent>
                       </AlertDialog>
                     )}
+                    {/* Toggle Premium */}
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="ghost" className={`h-7 text-xs gap-1 ${user.premiumActive ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-400 hover:bg-slate-700/50'}`}>
+                          <Crown className="w-3 h-3" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="bg-slate-900 border-slate-700">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="text-slate-100">{user.premiumActive ? 'Deactivate Premium' : 'Activate Premium'}</AlertDialogTitle>
+                          <AlertDialogDescription className="text-slate-400">
+                            {user.premiumActive
+                              ? `Remove Premium status from ${user.name}? They will lose premium features.`
+                              : `Manually activate Premium for ${user.name}? They will get 29 book uploads for 30 days.`}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => onAction('toggle_premium', user.id)}
+                            className={user.premiumActive ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-amber-600 hover:bg-amber-700 text-white'}
+                          >
+                            {user.premiumActive ? 'Deactivate' : 'Activate'}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                     {/* Delete user - not for admins or self */}
                     {!user.isAdmin && user.id !== adminId && (
                       <AlertDialog>
@@ -1982,9 +2027,95 @@ function AuditTab({ logs, loading }: { logs: AuditLogItem[]; loading: boolean })
   )
 }
 
+// ─── UPI Config Section ────────────────────────────────────────────
+
+function UPIConfigSection() {
+  const [upiId, setUpiId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [currentUpi, setCurrentUpi] = useState('')
+
+  useEffect(() => {
+    // Fetch current UPI from existing payments
+    const fetchUpi = async () => {
+      try {
+        const res = await fetch('/api/cnx-admin?type=payments')
+        if (res.ok) {
+          const d = await res.json()
+          const lastPayment = (d.payments || []).find((p: PaymentItem) => p.upiId)
+          if (lastPayment?.upiId) setCurrentUpi(lastPayment.upiId)
+          else setCurrentUpi('sagathiyapradip1137-3@oksbi')
+        }
+      } catch {
+        setCurrentUpi('sagathiyapradip1137-3@oksbi')
+      }
+    }
+    fetchUpi()
+  }, [])
+
+  const saveUpi = async () => {
+    if (!upiId.trim()) {
+      toast.error('UPI ID is required')
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_upi', targetId: 'default', details: { upiId: upiId.trim() } }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('UPI ID updated successfully')
+        setCurrentUpi(upiId.trim())
+        setUpiId('')
+      } else {
+        toast.error(data.error || 'Failed to update UPI ID')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className="p-5 bg-slate-900/50 border-slate-800">
+      <div className="flex items-center gap-2 mb-3">
+        <CreditCard className="w-4 h-4 text-brand" />
+        <h3 className="text-sm font-semibold text-slate-200">UPI Configuration</h3>
+      </div>
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex-1">
+          <p className="text-xs text-slate-500 mb-1">Current UPI ID</p>
+          <p className="text-sm text-brand font-mono font-semibold">{currentUpi || 'Not configured'}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <Input
+          value={upiId}
+          onChange={e => setUpiId(e.target.value)}
+          placeholder="Enter new UPI ID (e.g., name@oksbi)"
+          className="flex-1 bg-slate-800 border-slate-700 text-slate-200 h-9 text-sm"
+        />
+        <Button
+          size="sm"
+          onClick={saveUpi}
+          disabled={saving || !upiId.trim()}
+          className="gap-1.5 rounded-xl bg-brand hover:bg-brand/90 text-white"
+        >
+          {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+          Update
+        </Button>
+      </div>
+      <p className="text-xs text-slate-500 mt-2">This UPI ID will be used for all payment QR codes across the platform</p>
+    </Card>
+  )
+}
+
 // ─── Payments Tab ─────────────────────────────────────────────────
 
-function PaymentsTab({ payments, loading, onAction }: { payments: PaymentItem[]; loading: boolean; onAction: (a: string, t: string, d?: string) => void }) {
+function PaymentsTab({ payments, loading, onAction, revenueData }: { payments: PaymentItem[]; loading: boolean; onAction: (a: string, t: string, d?: string) => void; revenueData?: { totalRevenue: number; uploadFeeRevenue: number; premiumRevenue: number; premiumUsers: number; pendingPayments: number } | null }) {
   const [selectedPayment, setSelectedPayment] = useState<PaymentItem | null>(null)
 
   if (loading) return <LoadingSkeleton />
@@ -2004,6 +2135,50 @@ function PaymentsTab({ payments, loading, onAction }: { payments: PaymentItem[];
 
   return (
     <div className="space-y-4">
+      {/* Revenue Analytics Cards */}
+      {revenueData && (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <Card className="p-4 bg-amber-500/5 border-amber-500/20">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-amber-400" />
+              <span className="text-sm text-amber-400 font-medium">Total Revenue</span>
+            </div>
+            <p className="text-2xl font-bold text-amber-300 mt-1">{formatINR(revenueData.totalRevenue)}</p>
+          </Card>
+          <Card className="p-4 bg-brand/5 border-brand/20">
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-brand" />
+              <span className="text-sm text-brand font-medium">Upload Fees</span>
+            </div>
+            <p className="text-2xl font-bold text-brand mt-1">{formatINR(revenueData.uploadFeeRevenue)}</p>
+          </Card>
+          <Card className="p-4 bg-amber-500/5 border-amber-500/20">
+            <div className="flex items-center gap-2">
+              <Crown className="w-4 h-4 text-amber-400" />
+              <span className="text-sm text-amber-400 font-medium">Premium Revenue</span>
+            </div>
+            <p className="text-2xl font-bold text-amber-300 mt-1">{formatINR(revenueData.premiumRevenue)}</p>
+          </Card>
+          <Card className="p-4 bg-emerald-500/5 border-emerald-500/20">
+            <div className="flex items-center gap-2">
+              <Crown className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm text-emerald-400 font-medium">Premium Users</span>
+            </div>
+            <p className="text-2xl font-bold text-emerald-300 mt-1">{revenueData.premiumUsers}</p>
+          </Card>
+          <Card className="p-4 bg-cyan-500/5 border-cyan-500/20">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-cyan-400" />
+              <span className="text-sm text-cyan-400 font-medium">Pending</span>
+            </div>
+            <p className="text-2xl font-bold text-cyan-300 mt-1">{pending.length}</p>
+          </Card>
+        </div>
+      )}
+
+      {/* UPI Config Section */}
+      <UPIConfigSection />
+
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="p-4 bg-amber-500/5 border-amber-500/20">
@@ -2057,7 +2232,13 @@ function PaymentsTab({ payments, loading, onAction }: { payments: PaymentItem[];
               <p className="text-slate-200 font-bold text-lg flex items-center gap-1">
                 <IndianRupee className="w-4 h-4" />{selectedPayment.amount}
               </p>
-              <p className="text-slate-500 text-xs">Credits: {selectedPayment.uploadCredit}</p>
+              <p className="text-slate-500 text-xs">
+                {selectedPayment.paymentType === 'premium_plan' ? (
+                  <span className="flex items-center gap-1 text-amber-400"><Crown className="w-3 h-3" /> Premium Plan</span>
+                ) : (
+                  <span>Upload Credit: {selectedPayment.uploadCredit}</span>
+                )}
+              </p>
             </div>
             <div>
               <p className="text-slate-500 text-xs mb-1">UTR Number</p>
@@ -2156,6 +2337,11 @@ function PaymentsTab({ payments, loading, onAction }: { payments: PaymentItem[];
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-sm font-medium text-slate-200 truncate">{payment.user.name}</span>
+                    {payment.paymentType === 'premium_plan' && (
+                      <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-[10px] rounded-full shrink-0 gap-0.5">
+                        <Crown className="w-2.5 h-2.5" /> Premium
+                      </Badge>
+                    )}
                     <Badge className={`${sc.className} border text-[10px] rounded-full shrink-0`}>{sc.label}</Badge>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-slate-400">
@@ -2186,7 +2372,7 @@ function PaymentsTab({ payments, loading, onAction }: { payments: PaymentItem[];
                         <AlertDialogHeader>
                           <AlertDialogTitle className="text-slate-100">Approve Payment</AlertDialogTitle>
                           <AlertDialogDescription className="text-slate-400">
-                            Approve payment from {payment.user.name}? {payment.uploadCredit} credit(s) will be granted.
+                            Approve payment from {payment.user.name}? {payment.paymentType === 'premium_plan' ? 'Premium plan (29 uploads) will be activated.' : `${payment.uploadCredit} credit(s) will be granted.`}
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>

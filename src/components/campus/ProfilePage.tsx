@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { User, Star, BookOpen, Heart, Settings, BadgeCheck, MapPin, GraduationCap, Mail, Phone, ArrowLeft, CreditCard, CheckCircle, Clock, XCircle, Pencil, Trash2, Loader2, MoreVertical, Eye } from 'lucide-react'
+import { User, Star, BookOpen, Heart, Settings, BadgeCheck, MapPin, GraduationCap, Mail, Phone, ArrowLeft, CreditCard, CheckCircle, Clock, XCircle, Pencil, Trash2, Loader2, MoreVertical, Eye, Crown } from 'lucide-react'
 import { useAppStore, formatINR, CATEGORIES, parseListingImages, type EditingListingData } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -216,6 +216,7 @@ export default function ProfilePage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <h1 className="text-2xl font-bold text-foreground font-heading">{currentUser.name}</h1>
+                  {currentUser.premiumActive && <Badge className="bg-amber-500 text-white border-0 text-xs rounded-full gap-1"><Crown className="w-3 h-3" />Premium</Badge>}
                   {currentUser.isVerified && <BadgeCheck className="w-5 h-5 text-brand" />}
                   {currentUser.isAdmin && <Badge className="bg-brand text-white border-0 text-xs rounded-full">Admin</Badge>}
                 </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Clock, Upload, CheckCircle, AlertCircle, QrCode, Copy, ArrowRight, Shield, CreditCard, Smartphone, Image as ImageIcon, Loader2 } from 'lucide-react'
+import { X, Clock, Upload, CheckCircle, AlertCircle, QrCode, Copy, ArrowRight, Shield, CreditCard, Smartphone, Image as ImageIcon, Loader2, Crown, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +12,7 @@ interface PaymentModalProps {
   onClose: () => void
   userId: string
   onPaymentSuccess: () => void
+  paymentType?: 'upload_fee' | 'premium_plan'
 }
 
 interface PaymentSession {
@@ -23,11 +24,12 @@ interface PaymentSession {
   expiresAt: string
   createdAt: string
   status: string
+  paymentType: string
 }
 
 type PaymentStep = 'initiating' | 'qr_payment' | 'submit_proof' | 'verifying' | 'success' | 'expired' | 'error'
 
-export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess }: PaymentModalProps) {
+export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess, paymentType = 'upload_fee' }: PaymentModalProps) {
   const [step, setStep] = useState<PaymentStep>('initiating')
   const [paymentSession, setPaymentSession] = useState<PaymentSession | null>(null)
   const [utrNumber, setUtrNumber] = useState('')
@@ -38,6 +40,11 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
   const [timeLeft, setTimeLeft] = useState(300) // 5 minutes in seconds
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+
+  const isPremium = paymentType === 'premium_plan'
+  const amount = isPremium ? 149 : 10
+  const title = isPremium ? 'Premium Plan' : 'Upload Credit'
+  const subtitle = isPremium ? '29 Book Uploads for ₹149' : '1 Book Upload for ₹10'
 
   // Create payment session
   useEffect(() => {
@@ -50,7 +57,7 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
         const res = await fetch('/api/payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId })
+          body: JSON.stringify({ userId, paymentType })
         })
         const data = await res.json()
 
@@ -69,7 +76,7 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
     }
 
     createPayment()
-  }, [isOpen, userId])
+  }, [isOpen, userId, paymentType])
 
   // Countdown timer
   useEffect(() => {
@@ -243,7 +250,11 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="relative bg-gradient-to-br from-brand via-accent to-brand p-6 text-white">
+            <div className={`relative p-6 text-white ${
+              isPremium
+                ? 'bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600'
+                : 'bg-gradient-to-br from-brand via-accent to-brand'
+            }`}>
               <button
                 onClick={handleClose}
                 className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors"
@@ -252,11 +263,11 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
               </button>
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                  <CreditCard className="w-5 h-5" />
+                  {isPremium ? <Crown className="w-5 h-5" /> : <CreditCard className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold font-heading">Upload Credit</h2>
-                  <p className="text-white/70 text-xs">1 Book Upload for ₹10</p>
+                  <h2 className="text-lg font-bold font-heading">{title}</h2>
+                  <p className="text-white/70 text-xs">{subtitle}</p>
                 </div>
               </div>
 
@@ -277,8 +288,8 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
               {/* Step: Initiating */}
               {step === 'initiating' && (
                 <div className="text-center py-8">
-                  <div className="w-16 h-16 rounded-2xl bg-brand/10 flex items-center justify-center mx-auto mb-4 animate-pulse">
-                    <QrCode className="w-8 h-8 text-brand" />
+                  <div className={`w-16 h-16 rounded-2xl ${isPremium ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-brand/10'} flex items-center justify-center mx-auto mb-4 animate-pulse`}>
+                    <QrCode className={`w-8 h-8 ${isPremium ? 'text-amber-500' : 'text-brand'}`} />
                   </div>
                   <p className="text-muted-foreground">Creating payment session...</p>
                 </div>
@@ -321,19 +332,45 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
                   </div>
 
                   {/* Amount */}
-                  <div className="flex items-center justify-between bg-brand/5 dark:bg-brand/10 rounded-xl p-4">
+                  <div className={`flex items-center justify-between rounded-xl p-4 ${
+                    isPremium ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-brand/5 dark:bg-brand/10'
+                  }`}>
                     <div className="flex items-center gap-2">
-                      <Smartphone className="w-5 h-5 text-brand" />
+                      <Smartphone className={`w-5 h-5 ${isPremium ? 'text-amber-500' : 'text-brand'}`} />
                       <span className="text-sm font-medium text-foreground">Amount to Pay</span>
                     </div>
-                    <span className="text-xl font-bold text-brand font-heading">₹10</span>
+                    <span className={`text-xl font-bold font-heading ${isPremium ? 'text-amber-600 dark:text-amber-400' : 'text-brand'}`}>
+                      ₹{amount}
+                    </span>
+                  </div>
+
+                  {/* What you get */}
+                  <div className={`rounded-xl p-4 border ${
+                    isPremium ? 'bg-amber-50/50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800' : 'bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800'
+                  }`}>
+                    <p className="text-xs font-semibold text-foreground mb-2">What you get:</p>
+                    <ul className="space-y-1">
+                      {isPremium ? (
+                        <>
+                          <li className="text-xs text-muted-foreground flex items-center gap-2"><Crown className="w-3 h-3 text-amber-500" /> 29 Book Uploads</li>
+                          <li className="text-xs text-muted-foreground flex items-center gap-2"><Zap className="w-3 h-3 text-amber-500" /> Premium Badge & Search Priority</li>
+                          <li className="text-xs text-muted-foreground flex items-center gap-2"><Shield className="w-3 h-3 text-amber-500" /> Featured Seller Section</li>
+                        </>
+                      ) : (
+                        <li className="text-xs text-muted-foreground flex items-center gap-2"><CheckCircle className="w-3 h-3 text-emerald-500" /> 1 Upload Credit</li>
+                      )}
+                    </ul>
                   </div>
 
                   {/* Action Buttons */}
                   <div className="space-y-3">
                     <Button
                       onClick={() => setStep('submit_proof')}
-                      className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+                      className={`w-full h-12 text-white border-0 rounded-xl text-base font-semibold gap-2 ${
+                        isPremium
+                          ? 'bg-amber-500 hover:bg-amber-600 shadow-lg shadow-amber-500/30'
+                          : 'btn-gradient'
+                      }`}
                     >
                       I&apos;ve Made the Payment
                       <ArrowRight className="w-4 h-4" />
@@ -348,12 +385,14 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
               {/* Step: Submit Proof */}
               {step === 'submit_proof' && (
                 <div className="space-y-5">
-                  <div className="bg-brand/5 dark:bg-brand/10 rounded-xl p-4 border border-brand/20 dark:border-brand/30">
+                  <div className={`rounded-xl p-4 border ${
+                    isPremium ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800' : 'bg-brand/5 dark:bg-brand/10 border-brand/20 dark:border-brand/30'
+                  }`}>
                     <div className="flex items-start gap-2">
-                      <Shield className="w-5 h-5 text-brand shrink-0 mt-0.5" />
-                      <div className="text-sm text-brand dark:text-brand-light">
-                        <p className="font-medium mb-1">Payment Proof Required</p>
-                        <p className="text-xs opacity-80">Enter the UTR/Reference number from your UPI payment. This is a 12-digit number found in your payment receipt.</p>
+                      <Shield className={`w-5 h-5 shrink-0 mt-0.5 ${isPremium ? 'text-amber-500' : 'text-brand'}`} />
+                      <div className="text-sm">
+                        <p className={`font-medium mb-1 ${isPremium ? 'text-amber-600 dark:text-amber-400' : 'text-brand dark:text-brand-light'}`}>Payment Proof Required</p>
+                        <p className="text-xs opacity-80 text-muted-foreground">Enter the UTR/Reference number from your UPI payment. This is a 12-digit number found in your payment receipt.</p>
                       </div>
                     </div>
                   </div>
@@ -431,7 +470,9 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
                     <Button
                       onClick={handleSubmitProof}
                       disabled={utrNumber.trim().length < 6 && !screenshotFile}
-                      className="flex-1 h-11 btn-gradient text-white border-0 rounded-xl font-semibold gap-2"
+                      className={`flex-1 h-11 text-white border-0 rounded-xl font-semibold gap-2 ${
+                        isPremium ? 'bg-amber-500 hover:bg-amber-600' : 'btn-gradient'
+                      }`}
                     >
                       {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                       Submit Proof
@@ -443,12 +484,12 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
               {/* Step: Verifying */}
               {step === 'verifying' && (
                 <div className="text-center py-8">
-                  <div className="w-16 h-16 rounded-2xl bg-brand/10 flex items-center justify-center mx-auto mb-4">
+                  <div className={`w-16 h-16 rounded-2xl ${isPremium ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-brand/10'} flex items-center justify-center mx-auto mb-4`}>
                     <motion.div
                       animate={{ rotate: 360 }}
                       transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                     >
-                      <Shield className="w-8 h-8 text-brand" />
+                      <Shield className={`w-8 h-8 ${isPremium ? 'text-amber-500' : 'text-brand'}`} />
                     </motion.div>
                   </div>
                   <h3 className="text-lg font-bold text-foreground mb-1">Submitting Proof</h3>
@@ -470,7 +511,7 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
                   </motion.div>
                   <h3 className="text-xl font-bold text-foreground mb-2 font-heading">Proof Submitted!</h3>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Payment proof submitted! Admin will verify within 24 hours. You&apos;ll be notified once verified.
+                    Payment proof submitted! Admin will verify within 24 hours. {isPremium ? 'Your Premium plan will be activated once verified.' : 'Upload credits will be added once verified.'}
                   </p>
                   <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0 text-sm px-4 py-1.5 rounded-full">
                     <Clock className="w-3.5 h-3.5 mr-1" /> Pending Verification
@@ -478,9 +519,11 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
                   <div className="mt-6">
                     <Button
                       onClick={handleClose}
-                      className="btn-gradient text-white border-0 rounded-xl h-11 px-8 font-semibold"
+                      className={`text-white border-0 rounded-xl h-11 px-8 font-semibold ${
+                        isPremium ? 'bg-amber-500 hover:bg-amber-600' : 'btn-gradient'
+                      }`}
                     >
-                      Continue to Upload
+                      {isPremium ? 'Continue to Dashboard' : 'Continue to Upload'}
                     </Button>
                   </div>
                 </div>
@@ -506,7 +549,7 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
                           const res = await fetch('/api/payment', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ userId })
+                            body: JSON.stringify({ userId, paymentType })
                           })
                           const data = await res.json()
                           if (res.ok) {
@@ -523,7 +566,9 @@ export default function PaymentModal({ isOpen, onClose, userId, onPaymentSuccess
                       }
                       createPayment()
                     }}
-                    className="btn-gradient text-white border-0 rounded-xl h-11 px-8 font-semibold"
+                    className={`text-white border-0 rounded-xl h-11 px-8 font-semibold ${
+                      isPremium ? 'bg-amber-500 hover:bg-amber-600' : 'btn-gradient'
+                    }`}
                   >
                     Try Again
                   </Button>

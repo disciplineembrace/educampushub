@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, SlidersHorizontal, X, ChevronDown, BookOpen, MapPin, ArrowUpDown, Heart, MessageCircle, BadgeCheck, Flame, Star, Eye } from 'lucide-react'
+import { Search, SlidersHorizontal, X, ChevronDown, BookOpen, MapPin, ArrowUpDown, Heart, MessageCircle, BadgeCheck, Flame, Star, Eye, Crown } from 'lucide-react'
 import { useAppStore, formatINR, CATEGORIES, CONDITIONS, SEMESTERS, parseListingImages } from '@/lib/store'
 import { INDIAN_STATES, INDIAN_DISTRICTS } from '@/lib/indian-states-districts'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
@@ -29,7 +29,10 @@ interface Listing {
   isVerified: boolean
   views: number
   images: string
-  seller: { id: string; name: string; college: string | null; isVerified: boolean; rating: number }
+  uploadType: string
+  state: string
+  district: string
+  seller: { id: string; name: string; college: string | null; isVerified: boolean; rating: number; avatar?: string | null }
 }
 
 const SORT_OPTIONS = [
@@ -327,7 +330,7 @@ export default function ExplorePage() {
                 return (
                   <motion.div
                     key={listing.id}
-                    className="group card-premium glow-hover overflow-hidden cursor-pointer"
+                    className={`group overflow-hidden cursor-pointer ${listing.uploadType === 'premium' ? 'ring-2 ring-amber-400 dark:ring-amber-500 shadow-lg shadow-amber-500/10 rounded-2xl bg-card' : 'card-premium glow-hover'}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: i * 0.03 }}
@@ -341,6 +344,7 @@ export default function ExplorePage() {
                         <BookOpen className="w-12 h-12 text-white/60" />
                       )}
                       <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
+                        {listing.uploadType === 'premium' && <Badge className="bg-amber-500 text-white border-0 text-[10px] px-2.5 py-0.5 rounded-full"><Crown className="w-3 h-3 mr-0.5" />Premium</Badge>}
                         {listing.isFeatured && <Badge className="bg-amber-500 text-white border-0 text-[10px] px-2 py-0.5 rounded-full"><Star className="w-3 h-3 mr-0.5" />{t('explore.badge.featured')}</Badge>}
                         {listing.isUrgent && <Badge className="bg-red-500 text-white border-0 text-[10px] px-2 py-0.5 rounded-full"><Flame className="w-3 h-3 mr-0.5" />{t('explore.badge.urgent')}</Badge>}
                         {listing.isVerified && <Badge className="bg-emerald-500 text-white border-0 text-[10px] px-2 py-0.5 rounded-full"><BadgeCheck className="w-3 h-3 mr-0.5" />{t('explore.badge.verified')}</Badge>}
@@ -373,10 +377,13 @@ export default function ExplorePage() {
                       </div>
                       <div className="flex items-center justify-between pt-3 border-t border-border">
                         <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-brand to-accent flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                            {listing.seller.name.charAt(0)}
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${listing.uploadType === 'premium' ? 'bg-gradient-to-br from-amber-400 to-orange-500 ring-1 ring-amber-300 dark:ring-amber-700' : 'bg-gradient-to-br from-brand to-accent'}`}>
+                            {listing.seller.avatar ? <img src={listing.seller.avatar} className="w-full h-full rounded-full object-cover" /> : listing.seller.name.charAt(0)}
                           </div>
-                          <p className="text-xs font-medium text-foreground truncate">{listing.seller.name}</p>
+                          <div className="flex items-center gap-1 min-w-0">
+                            <p className="text-xs font-medium text-foreground truncate">{listing.seller.name}</p>
+                            {listing.uploadType === 'premium' && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
+                          </div>
                         </div>
                         <a href={`https://wa.me/91${listing.whatsappNumber}?text=Hi! I saw your listing "${listing.title}" on EduCampusHub`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
                           <Button size="sm" className="h-7 bg-emerald-500 hover:bg-emerald-600 text-white border-0 text-xs px-3 gap-1 rounded-full">
