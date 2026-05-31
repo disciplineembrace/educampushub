@@ -46,8 +46,8 @@ export async function POST(request: Request) {
       results.push(`❌ PasswordResetOTP table error: ${tableError.message?.substring(0, 150)}`)
     }
 
-    // 2. Seed/Update admin user
-    const adminEmail = 'disciplineembrace@gmail.com'
+    // 2. Seed/Update Super Admin user
+    const adminEmail = 'sagathiyapradip2002@gmail.com'
     const adminPassword = '@deval1808'
     const adminPhone = '9974331007'
 
@@ -56,31 +56,50 @@ export async function POST(request: Request) {
       
       // Check if admin exists
       const existing = await sql`
-        SELECT id, "isAdmin" FROM "User" WHERE email = ${adminEmail}
+        SELECT id, "isAdmin", "isSuperAdmin" FROM "User" WHERE email = ${adminEmail}
       `
       
       if (existing.length > 0) {
-        // Update existing admin
+        // Update existing user to Super Admin
         await sql`
           UPDATE "User" SET 
             "isAdmin" = true,
             "adminRole" = 'super_admin',
+            "isSuperAdmin" = true,
+            "twoFactorEnabled" = true,
             "passwordHash" = ${hash},
             "mustChangePassword" = false,
             "isVerified" = true,
             phone = ${adminPhone},
-            name = 'EduCampusHub Admin',
+            name = 'Super Admin',
             "updatedAt" = CURRENT_TIMESTAMP
           WHERE email = ${adminEmail}
         `
-        results.push(`✅ Admin user updated: ${adminEmail} / phone: ${adminPhone}`)
+        results.push(`✅ Super Admin updated: ${adminEmail} / phone: ${adminPhone} / 2FA: enabled`)
       } else {
-        // Create admin user
+        // Create Super Admin user
         await sql`
-          INSERT INTO "User" (id, email, name, "isAdmin", "adminRole", "passwordHash", "mustChangePassword", "isVerified", phone, city, "freeUploadUsed", "paidUploadCredits", "totalBooksUploaded", rating, "totalSales", "createdAt", "updatedAt")
-          VALUES (gen_random_uuid(), ${adminEmail}, 'EduCampusHub Admin', true, 'super_admin', ${hash}, false, true, ${adminPhone}, 'Delhi', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          INSERT INTO "User" (id, email, name, "isAdmin", "adminRole", "isSuperAdmin", "twoFactorEnabled", "passwordHash", "mustChangePassword", "isVerified", phone, city, "freeUploadUsed", "paidUploadCredits", "totalBooksUploaded", rating, "totalSales", "createdAt", "updatedAt")
+          VALUES (gen_random_uuid(), ${adminEmail}, 'Super Admin', true, 'super_admin', true, true, ${hash}, false, true, ${adminPhone}, 'Delhi', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `
-        results.push(`✅ Admin user created: ${adminEmail} / phone: ${adminPhone}`)
+        results.push(`✅ Super Admin created: ${adminEmail} / phone: ${adminPhone} / 2FA: enabled`)
+      }
+
+      // Ensure no other user has isSuperAdmin = true
+      await sql`
+        UPDATE "User" SET "isSuperAdmin" = false WHERE email != ${adminEmail} AND "isSuperAdmin" = true
+      `
+
+      // Demote legacy admin to moderator if exists
+      const legacyEmail = 'disciplineembrace@gmail.com'
+      const legacyAdmin = await sql`
+        SELECT id FROM "User" WHERE email = ${legacyEmail} AND "isAdmin" = true AND "isSuperAdmin" = false
+      `
+      if (legacyAdmin.length > 0) {
+        await sql`
+          UPDATE "User" SET "adminRole" = 'moderator', "twoFactorEnabled" = false WHERE email = ${legacyEmail}
+        `
+        results.push(`✅ Legacy admin ${legacyEmail} demoted to moderator`)
       }
     } catch (adminError: any) {
       results.push(`❌ Admin user error: ${adminError.message?.substring(0, 150)}`)
