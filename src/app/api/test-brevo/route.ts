@@ -9,6 +9,12 @@ export async function GET() {
     return NextResponse.json({
       error: 'No email service configured',
       hint: 'Set RESEND_API_KEY (recommended) or BREVO_API_KEY in environment variables',
+      debug: {
+        BREVO_API_KEY_set: !!process.env.BREVO_API_KEY,
+        BREVO_API_KEY_length: process.env.BREVO_API_KEY?.length || 0,
+        BREVO_API_KEY_prefix: process.env.BREVO_API_KEY?.substring(0, 10) || 'none',
+        RESEND_API_KEY_set: !!process.env.RESEND_API_KEY,
+      }
     })
   }
 
