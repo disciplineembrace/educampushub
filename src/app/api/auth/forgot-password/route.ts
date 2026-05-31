@@ -91,6 +91,12 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP(user.email, normalizedPhone, otp)
 
+      // Debug: Check SMS provider config
+      const providers = getConfiguredProviders()
+      console.log(`[Forgot Password] Configured providers: ${providers.join(', ')}`)
+      console.log(`[Forgot Password] FAST2SMS_API_KEY set: ${!!process.env.FAST2SMS_API_KEY}`)
+      console.log(`[Forgot Password] isSmsProviderConfigured: ${isSmsProviderConfigured()}`)
+
       // Send OTP via SMS (multi-provider with fallback)
       const smsResult = await sendOTPSMS(normalizedPhone, otp)
 
@@ -106,6 +112,12 @@ export async function POST(request: Request) {
         return NextResponse.json({
           error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}. Please try again later.`,
           smsError: true,
+          debug: {
+            providers,
+            fast2smsSet: !!process.env.FAST2SMS_API_KEY,
+            smsProvider: smsResult.provider,
+            smsError: smsResult.error,
+          }
         }, { status: 503 })
       }
 
