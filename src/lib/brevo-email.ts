@@ -1,18 +1,28 @@
 /**
- * Brevo (Sendinblue) Email Utility for EduCampusHub
+ * Email Utility for EduCampusHub
  * 
- * Sends OTP verification emails via Brevo SMTP API.
- * API Key stored as BREVO_API_KEY environment variable.
+ * Sends OTP verification emails via:
+ * 1. Resend API (primary - no IP restrictions)
+ * 2. Brevo SMTP API (fallback)
  * 
- * Brevo API docs: https://developers.brevo.com/reference/sendtransacemail
+ * Environment Variables:
+ * - RESEND_API_KEY: Resend API key (primary, recommended)
+ * - BREVO_API_KEY: Brevo API key (fallback)
+ * - EMAIL_FROM: Sender email address (optional, defaults vary by provider)
+ * - EMAIL_FROM_NAME: Sender name (optional, defaults to 'EduCampusHub')
  */
 
 // ─── Configuration ───
 
+const RESEND_API_KEY = () => process.env.RESEND_API_KEY || ''
 const BREVO_API_KEY = () => process.env.BREVO_API_KEY || ''
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
-const SENDER_EMAIL = 'noreply@educampushub.in'
-const SENDER_NAME = 'EduCampusHub'
+
+const SENDER_NAME = () => process.env.EMAIL_FROM_NAME || 'EduCampusHub'
+
+// Default sender emails per provider
+const RESEND_SENDER_EMAIL = () => process.env.EMAIL_FROM || 'onboarding@resend.dev'
+const BREVO_SENDER_EMAIL = () => process.env.EMAIL_FROM || 'noreply@educampushub.in'
 
 // ─── Types ───
 
@@ -130,7 +140,7 @@ function getOTPEmailHTML(params: OTPEmailParams): string {
                 <tr>
                   <td style="background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 8px; padding: 12px 16px;">
                     <p style="margin: 0; font-size: 13px; color: #92400e; line-height: 1.5;">
-                      <strong>⏱ Expires in ${expiryMinutes} minutes.</strong> This code is valid for a limited time only. Do not share it with anyone.
+                      <strong>Expires in ${expiryMinutes} minutes.</strong> This code is valid for a limited time only. Do not share it with anyone.
                     </p>
                   </td>
                 </tr>
@@ -149,7 +159,7 @@ function getOTPEmailHTML(params: OTPEmailParams): string {
                 This is an automated email from EduCampusHub. Please do not reply.
               </p>
               <p style="margin: 0; font-size: 12px; color: #9ca3af;">
-                © 2025 EduCampusHub. All rights reserved.
+                &copy; 2025 EduCampusHub. All rights reserved.
               </p>
             </td>
           </tr>
@@ -186,29 +196,85 @@ If you didn't request this code, you can safely ignore this email.
   `.trim()
 }
 
-// ─── Send OTP Email ───
+// ─── Send via Resend ───
 
-export async function sendOTPEmail(params: OTPEmailParams): Promise<EmailResult> {
-  const apiKey = BREVO_API_KEY()
-
+async function sendViaResend(params: OTPEmailParams): Promise<EmailResult> {
+  const apiKey = RESEND_API_KEY()
   if (!apiKey) {
-    console.error('[Brevo] BREVO_API_KEY is not set. Email OTP will not be sent.')
-    console.log(`[OTP-EMAIL] To: ${params.to}, OTP: ${params.otp}, Purpose: ${params.purpose}`)
-    return {
-      success: false,
-      message: 'Email service not configured',
-      provider: 'console_log',
-    }
+    return { success: false, message: 'RESEND_API_KEY not configured', provider: 'resend' }
   }
 
   try {
     const htmlContent = getOTPEmailHTML(params)
     const textContent = getOTPEmailText(params)
+    const senderEmail = RESEND_SENDER_EMAIL()
+    const senderName = SENDER_NAME()
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: `${senderName} <${senderEmail}>`,
+        to: [params.to],
+        subject: `Your EduCampusHub Verification Code: ${params.otp}`,
+        html: htmlContent,
+        text: textContent,
+        tags: [
+          { name: 'type', value: 'otp' },
+          { name: 'purpose', value: params.purpose },
+        ],
+      }),
+    })
+
+    const data = await response.json()
+
+    if (response.ok && data.id) {
+      console.log(`[Resend] OTP email sent to ${params.to}, id: ${data.id}`)
+      return {
+        success: true,
+        message: 'OTP email sent successfully',
+        messageId: data.id,
+        provider: 'Resend',
+      }
+    }
+
+    console.error('[Resend] API error:', JSON.stringify(data))
+    return {
+      success: false,
+      message: data.message || data.error?.message || 'Failed to send email via Resend',
+      provider: 'Resend',
+    }
+  } catch (error) {
+    console.error('[Resend] Request error:', error)
+    return {
+      success: false,
+      message: 'Resend service temporarily unavailable',
+      provider: 'Resend',
+    }
+  }
+}
+
+// ─── Send via Brevo ───
+
+async function sendViaBrevo(params: OTPEmailParams): Promise<EmailResult> {
+  const apiKey = BREVO_API_KEY()
+  if (!apiKey) {
+    return { success: false, message: 'BREVO_API_KEY not configured', provider: 'brevo' }
+  }
+
+  try {
+    const htmlContent = getOTPEmailHTML(params)
+    const textContent = getOTPEmailText(params)
+    const senderEmail = BREVO_SENDER_EMAIL()
+    const senderName = SENDER_NAME()
 
     const payload = {
       sender: {
-        name: SENDER_NAME,
-        email: SENDER_EMAIL,
+        name: senderName,
+        email: senderEmail,
       },
       to: [
         {
@@ -250,48 +316,116 @@ export async function sendOTPEmail(params: OTPEmailParams): Promise<EmailResult>
     // Handle Brevo API errors
     console.error('[Brevo] API error:', JSON.stringify(data))
 
-    // Fallback to console log
-    console.log(`[OTP-EMAIL-FALLBACK] To: ${params.to}, OTP: ${params.otp}, Purpose: ${params.purpose}`)
-
     return {
       success: false,
       message: data.message || 'Failed to send email via Brevo',
-      provider: 'console_log',
+      provider: 'Brevo',
     }
   } catch (error) {
     console.error('[Brevo] Request error:', error)
-    console.log(`[OTP-EMAIL-FALLBACK] To: ${params.to}, OTP: ${params.otp}, Purpose: ${params.purpose}`)
     return {
       success: false,
-      message: 'Email service temporarily unavailable',
-      provider: 'console_log',
+      message: 'Brevo service temporarily unavailable',
+      provider: 'Brevo',
     }
   }
 }
 
-// ─── Verify Brevo API Key ───
+// ─── Main Send OTP Email Function ───
+
+export async function sendOTPEmail(params: OTPEmailParams): Promise<EmailResult> {
+  const resendKey = RESEND_API_KEY()
+  const brevoKey = BREVO_API_KEY()
+
+  // If no email service is configured, log to console
+  if (!resendKey && !brevoKey) {
+    console.error('[Email] No email service configured. Set RESEND_API_KEY or BREVO_API_KEY.')
+    console.log(`[OTP-EMAIL] To: ${params.to}, OTP: ${params.otp}, Purpose: ${params.purpose}`)
+    return {
+      success: false,
+      message: 'Email service not configured',
+      provider: 'console_log',
+    }
+  }
+
+  // Try Resend first (no IP restrictions, more reliable)
+  if (resendKey) {
+    console.log('[Email] Attempting to send via Resend...')
+    const result = await sendViaResend(params)
+    if (result.success) return result
+    console.warn('[Email] Resend failed, trying Brevo as fallback...')
+  }
+
+  // Try Brevo as fallback
+  if (brevoKey) {
+    console.log('[Email] Attempting to send via Brevo...')
+    const result = await sendViaBrevo(params)
+    if (result.success) return result
+    console.warn('[Email] Brevo also failed.')
+  }
+
+  // All providers failed - log OTP to console for debugging
+  console.log(`[OTP-EMAIL-FALLBACK] To: ${params.to}, OTP: ${params.otp}, Purpose: ${params.purpose}`)
+  return {
+    success: false,
+    message: 'All email providers failed. Please check your email service configuration.',
+    provider: 'console_log',
+  }
+}
+
+// ─── Verify Email Connection ───
 
 export async function verifyBrevoConnection(): Promise<{ valid: boolean; info?: string }> {
-  const apiKey = BREVO_API_KEY()
-  if (!apiKey) {
-    return { valid: false, info: 'BREVO_API_KEY is not set' }
-  }
-
-  try {
-    const response = await fetch('https://api.brevo.com/v3/account', {
-      method: 'GET',
-      headers: {
-        'api-key': apiKey,
-        Accept: 'application/json',
-      },
-    })
-
-    if (response.ok) {
-      const data = await response.json()
-      return { valid: true, info: `Connected: ${data.email}` }
+  // Check Resend first
+  const resendKey = RESEND_API_KEY()
+  if (resendKey) {
+    try {
+      const response = await fetch('https://api.resend.com/domains', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${resendKey}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      if (response.ok) {
+        return { valid: true, info: 'Resend: Connected successfully' }
+      }
+      return { valid: false, info: `Resend: API returned status ${response.status}` }
+    } catch (error) {
+      return { valid: false, info: `Resend: Connection error: ${(error as Error).message}` }
     }
-    return { valid: false, info: `API returned status ${response.status}` }
-  } catch (error) {
-    return { valid: false, info: `Connection error: ${(error as Error).message}` }
   }
+
+  // Check Brevo
+  const brevoKey = BREVO_API_KEY()
+  if (brevoKey) {
+    try {
+      const response = await fetch('https://api.brevo.com/v3/account', {
+        method: 'GET',
+        headers: {
+          'api-key': brevoKey,
+          Accept: 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        return { valid: true, info: `Brevo: Connected: ${data.email}` }
+      }
+
+      // Check if it's an IP restriction error
+      const data = await response.json()
+      if (data.code === 'unauthorized' && data.message?.includes('unrecognised IP')) {
+        return {
+          valid: false,
+          info: `Brevo: IP restriction active. Disable it at https://app.brevo.com/security/authorised_ips or switch to Resend (set RESEND_API_KEY).`,
+        }
+      }
+      return { valid: false, info: `Brevo: API returned status ${response.status}` }
+    } catch (error) {
+      return { valid: false, info: `Brevo: Connection error: ${(error as Error).message}` }
+    }
+  }
+
+  return { valid: false, info: 'No email service configured. Set RESEND_API_KEY or BREVO_API_KEY.' }
 }
