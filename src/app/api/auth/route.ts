@@ -208,6 +208,123 @@ export async function POST(request: Request) {
       return response
     }
 
+    // ─── SEND LOGIN OTP (Phone-based login) ──────────────────
+    if (action === 'send_login_otp') {
+      const { phone } = body
+
+      if (!phone || typeof phone !== 'string') {
+        return NextResponse.json({ error: 'Phone number is required' }, { status: 400 })
+      }
+
+      const cleanedPhone = phone.replace(/\D/g, '')
+      const normalizedPhone = cleanedPhone.length === 12 ? cleanedPhone.slice(2) : cleanedPhone
+
+      if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
+        return NextResponse.json({ error: 'Please enter a valid 10-digit Indian mobile number' }, { status: 400 })
+      }
+
+      // Find user by phone
+      const user = await db.user.findFirst({ where: { phone: normalizedPhone } })
+      if (!user || !user.passwordHash) {
+        // Don't reveal if phone exists — but give a hint for better UX
+        return NextResponse.json({ error: 'No account found with this phone number. Please register first.' }, { status: 404 })
+      }
+
+      if (user.isBanned) {
+        return NextResponse.json({ error: 'This account has been banned' }, { status: 403 })
+      }
+
+      // Check SMS provider
+      if (!isSmsProviderConfigured()) {
+        return NextResponse.json({
+          error: 'SMS service is currently unavailable. Please try again later or contact support.',
+          smsError: true,
+        }, { status: 503 })
+      }
+
+      // Check OTP rate limit
+      const rateLimit = checkOTPRateLimit(normalizedPhone)
+      if (!rateLimit.allowed) {
+        return NextResponse.json({ error: rateLimit.reason, retryAfterMs: rateLimit.retryAfterMs }, { status: 429 })
+      }
+
+      // Generate and store OTP
+      const otp = generateOTP()
+      await storeOTP(user.email, normalizedPhone, otp)
+
+      // Send OTP via SMS
+      const smsResult = await sendOTPSMS(normalizedPhone, otp)
+
+      // Cleanup expired OTPs
+      cleanupExpiredOTPs().catch(() => {})
+
+      // Mask phone for response
+      const maskedPhone = normalizedPhone.slice(0, 2) + '****' + normalizedPhone.slice(-2)
+
+      if (!smsResult.success) {
+        console.error(`[Login OTP] SMS delivery failed for ${normalizedPhone}: ${smsResult.error}`)
+        return NextResponse.json({
+          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}`,
+          smsError: true,
+          needsAccountSetup: smsResult.needsAccountSetup || false,
+          setupInstructions: smsResult.setupInstructions || '',
+        }, { status: 503 })
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `OTP sent to ${maskedPhone}`,
+        maskedPhone,
+        email: user.email,
+        ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
+      })
+    }
+
+    // ─── VERIFY LOGIN OTP (Phone-based login) ─────────────────
+    if (action === 'verify_login_otp') {
+      const { phone, otp } = body
+
+      if (!phone || !otp) {
+        return NextResponse.json({ error: 'Phone number and OTP are required' }, { status: 400 })
+      }
+
+      const cleanedPhone = phone.replace(/\D/g, '')
+      const normalizedPhone = cleanedPhone.length === 12 ? cleanedPhone.slice(2) : cleanedPhone
+
+      // Find user by phone
+      const user = await db.user.findFirst({ where: { phone: normalizedPhone } })
+      if (!user) {
+        return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      }
+
+      // Verify OTP using user's email
+      const result = await verifyOTP(user.email, otp)
+
+      if (!result.valid) {
+        return NextResponse.json({ error: result.reason || 'Invalid or expired OTP' }, { status: 400 })
+      }
+
+      // OTP verified — create session and log user in
+      const token = await createUserSession(user.id, request)
+      const safeUser = sanitizeUser(user as unknown as Record<string, unknown>)
+
+      const response = NextResponse.json({
+        user: safeUser,
+        token,
+        message: 'Login successful!',
+      })
+
+      response.cookies.set('session_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60,
+        path: '/',
+      })
+
+      return response
+    }
+
     // ─── SEND REGISTRATION OTP ───────────────────────────────
     if (action === 'send_registration_otp') {
       const { phone, email } = body
@@ -248,9 +365,9 @@ export async function POST(request: Request) {
       }
 
       // Check OTP rate limit
-      const rateLimit = checkOTPRateLimit(normalizedPhone)
-      if (!rateLimit.allowed) {
-        return NextResponse.json({ error: rateLimit.reason, retryAfterMs: rateLimit.retryAfterMs }, { status: 429 })
+      const regRateLimit = checkOTPRateLimit(normalizedPhone)
+      if (!regRateLimit.allowed) {
+        return NextResponse.json({ error: regRateLimit.reason, retryAfterMs: regRateLimit.retryAfterMs }, { status: 429 })
       }
 
       // Generate and store OTP (use a temporary email placeholder)

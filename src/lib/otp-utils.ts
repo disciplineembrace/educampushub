@@ -1,17 +1,11 @@
 /**
  * OTP Utility Module for EduCampusHub
  *
- * Multi-provider SMS delivery with automatic fallback:
- *   1. Fast2SMS (primary   — configured with API key)
- *   2. MSG91  (fallback — DLT-approved, best for India production)
- *   3. Console log (development only — returns success=false in production)
- *
- * Fast2SMS Route Priority:
- *   1. Quick route (route: 'q') — works without DLT, best for new accounts
- *   2. OTP route (route: 'otp') — built-in OTP template, needs website verification
- *   3. Transactional route (route: 't') — needs ₹100+ balance
- *   4. DLT route (route: 'dlt') — needs DLT template ID
- *   5. V1 Bulk API (legacy) — last resort fallback
+ * Production-ready Fast2SMS integration for OTP delivery.
+ * Uses the official Fast2SMS bulkV2 API with route fallback:
+ *   1. OTP route (route: 'otp') — built-in OTP template, best delivery rate
+ *   2. Quick route (route: 'q')  — works without DLT, good for new accounts
+ *   3. Transactional route (route: 't') — needs ₹100+ wallet balance
  *
  * Uses Neon serverless driver (HTTP) for database queries
  * to ensure reliable connectivity in serverless environments.
@@ -27,6 +21,7 @@ const OTP_EXPIRY_MINUTES = 5
 const OTP_RATE_LIMIT_WINDOW = 60 * 1000        // 1 minute between OTPs
 const OTP_MAX_REQUESTS_PER_HOUR = 5
 const OTP_MAX_VERIFY_ATTEMPTS = 3
+const SMS_TIMEOUT_MS = 15_000                    // 15 second timeout per SMS attempt
 
 // SMS Provider env keys
 const FAST2SMS_API_KEY  = () => process.env.FAST2SMS_API_KEY
@@ -169,7 +164,7 @@ export async function verifyOTP(email: string, otpCode: string): Promise<{ valid
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// SMS DELIVERY — Multi-provider with automatic fallback
+// SMS DELIVERY — Fast2SMS with route fallback + MSG91 fallback
 // ═══════════════════════════════════════════════════════════════════
 
 export interface SMSResult {
@@ -214,11 +209,21 @@ export function getConfiguredProviders(): string[] {
   return providers
 }
 
-// ─── Provider 1: Fast2SMS (Primary — configured with API key) ───
+// ─── Fetch with timeout helper ───
 
-/**
- * Classify a Fast2SMS error into a user-friendly message and setup instructions.
- */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal })
+    return response
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ─── Fast2SMS Error Classification ───
+
 function classifyFast2SMSError(statusCode: number, rawMessage: string): {
   userMessage: string
   needsAccountSetup: boolean
@@ -264,6 +269,8 @@ function classifyFast2SMSError(statusCode: number, rawMessage: string): {
   }
 }
 
+// ─── Provider 1: Fast2SMS (Primary) ───
+
 async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
   const apiKey = FAST2SMS_API_KEY()
 
@@ -273,19 +280,59 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
 
   const normalizedPhone = normalizePhone(phone)
   const maskedPhone = `${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)}`
-  const otpMessage = `Your EduCampusHub OTP is ${otp}. Do not share with anyone. Valid for ${OTP_EXPIRY_MINUTES} minutes.`
+  const otpMessage = `${otp} is your EduCampusHub verification code. Do not share with anyone. Valid for ${OTP_EXPIRY_MINUTES} minutes.`
 
   // Collect errors from each route attempt for diagnostic purposes
   const routeErrors: { route: string; statusCode: number; message: string }[] = []
 
   try {
-    // ─── Attempt 1: Quick Route (best for accounts without DLT) ───
-    // Quick route is designed for users without DLT registration.
-    // It works for OTP, transactional, and promotional messages.
-    console.log(`[Fast2SMS] Attempt 1: Quick route for ${maskedPhone}`)
+    // ─── Attempt 1: OTP Route (BEST for OTP delivery — uses built-in template) ───
+    // The OTP route uses Fast2SMS's pre-approved OTP template which has the highest
+    // delivery rate and doesn't require custom DLT templates.
+    console.log(`[Fast2SMS] Attempt 1: OTP route for ${maskedPhone}`)
 
     try {
-      const qResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+      const otpResponse = await fetchWithTimeout('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: {
+          'authorization': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          route: 'otp',
+          variables_values: otp,
+          numbers: normalizedPhone,
+          flash: 0,
+        }),
+      }, SMS_TIMEOUT_MS)
+
+      const otpData = await otpResponse.json()
+
+      if (otpData.return === true) {
+        console.log(`[Fast2SMS] OTP route SUCCESS for ${maskedPhone} | Request ID: ${otpData.request_id || 'N/A'}`)
+        return {
+          success: true,
+          message: 'OTP sent successfully via Fast2SMS',
+          provider: 'Fast2SMS',
+          deliveryId: otpData.request_id || undefined,
+        }
+      }
+
+      routeErrors.push({ route: 'otp', statusCode: otpData.status_code, message: otpData.message })
+      console.warn(`[Fast2SMS] OTP route failed (${otpData.status_code}): ${otpData.message}`)
+    } catch (e: any) {
+      const errMsg = e.name === 'AbortError' ? 'Request timed out' : e.message
+      routeErrors.push({ route: 'otp', statusCode: 0, message: errMsg })
+      console.warn(`[Fast2SMS] OTP route error: ${errMsg}`)
+    }
+
+    // ─── Attempt 2: Quick Route (works without DLT/website verification) ───
+    // The Quick route is designed for users without DLT registration.
+    // It works for promotional, transactional, and OTP messages.
+    console.log(`[Fast2SMS] Attempt 2: Quick route for ${maskedPhone}`)
+
+    try {
+      const qResponse = await fetchWithTimeout('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
         headers: {
           'authorization': apiKey,
@@ -298,7 +345,7 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
           flash: 0,
           numbers: normalizedPhone,
         }),
-      })
+      }, SMS_TIMEOUT_MS)
 
       const qData = await qResponse.json()
 
@@ -306,7 +353,7 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
         console.log(`[Fast2SMS] Quick route SUCCESS for ${maskedPhone} | Request ID: ${qData.request_id || 'N/A'}`)
         return {
           success: true,
-          message: 'OTP sent successfully via Fast2SMS',
+          message: 'OTP sent successfully via Fast2SMS (Quick route)',
           provider: 'Fast2SMS',
           deliveryId: qData.request_id || undefined,
         }
@@ -315,52 +362,16 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
       routeErrors.push({ route: 'quick', statusCode: qData.status_code, message: qData.message })
       console.warn(`[Fast2SMS] Quick route failed (${qData.status_code}): ${qData.message}`)
     } catch (e: any) {
-      routeErrors.push({ route: 'quick', statusCode: 0, message: e.message })
-      console.warn(`[Fast2SMS] Quick route error: ${e.message}`)
+      const errMsg = e.name === 'AbortError' ? 'Request timed out' : e.message
+      routeErrors.push({ route: 'quick', statusCode: 0, message: errMsg })
+      console.warn(`[Fast2SMS] Quick route error: ${errMsg}`)
     }
 
-    // ─── Attempt 2: OTP Route (built-in OTP template) ───
-    console.log(`[Fast2SMS] Attempt 2: OTP route for ${maskedPhone}`)
-
-    try {
-      const otpResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-        method: 'POST',
-        headers: {
-          'authorization': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          route: 'otp',
-          variables_values: otp,
-          numbers: normalizedPhone,
-          flash: 0,
-        }),
-      })
-
-      const otpData = await otpResponse.json()
-
-      if (otpData.return === true) {
-        console.log(`[Fast2SMS] OTP route SUCCESS for ${maskedPhone} | Request ID: ${otpData.request_id || 'N/A'}`)
-        return {
-          success: true,
-          message: 'OTP sent successfully via Fast2SMS (OTP route)',
-          provider: 'Fast2SMS',
-          deliveryId: otpData.request_id || undefined,
-        }
-      }
-
-      routeErrors.push({ route: 'otp', statusCode: otpData.status_code, message: otpData.message })
-      console.warn(`[Fast2SMS] OTP route failed (${otpData.status_code}): ${otpData.message}`)
-    } catch (e: any) {
-      routeErrors.push({ route: 'otp', statusCode: 0, message: e.message })
-      console.warn(`[Fast2SMS] OTP route error: ${e.message}`)
-    }
-
-    // ─── Attempt 3: Transactional Route ───
+    // ─── Attempt 3: Transactional Route (needs ₹100+ balance) ───
     console.log(`[Fast2SMS] Attempt 3: Transactional route for ${maskedPhone}`)
 
     try {
-      const tResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+      const tResponse = await fetchWithTimeout('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
         headers: {
           'authorization': apiKey,
@@ -373,7 +384,7 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
           flash: 0,
           numbers: normalizedPhone,
         }),
-      })
+      }, SMS_TIMEOUT_MS)
 
       const tData = await tResponse.json()
 
@@ -390,8 +401,9 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
       routeErrors.push({ route: 'transactional', statusCode: tData.status_code, message: tData.message })
       console.warn(`[Fast2SMS] Transactional route failed (${tData.status_code}): ${tData.message}`)
     } catch (e: any) {
-      routeErrors.push({ route: 'transactional', statusCode: 0, message: e.message })
-      console.warn(`[Fast2SMS] Transactional route error: ${e.message}`)
+      const errMsg = e.name === 'AbortError' ? 'Request timed out' : e.message
+      routeErrors.push({ route: 'transactional', statusCode: 0, message: errMsg })
+      console.warn(`[Fast2SMS] Transactional route error: ${errMsg}`)
     }
 
     // ─── Attempt 4: DLT Route (if template configured) ───
@@ -400,7 +412,7 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
       console.log(`[Fast2SMS] Attempt 4: DLT route with template ${dltTemplateId}`)
 
       try {
-        const dltResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        const dltResponse = await fetchWithTimeout('https://www.fast2sms.com/dev/bulkV2', {
           method: 'POST',
           headers: {
             'authorization': apiKey,
@@ -414,7 +426,7 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
             numbers: normalizedPhone,
             flash: 0,
           }),
-        })
+        }, SMS_TIMEOUT_MS)
 
         const dltData = await dltResponse.json()
 
@@ -431,47 +443,10 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
         routeErrors.push({ route: 'dlt', statusCode: dltData.status_code, message: dltData.message })
         console.warn(`[Fast2SMS] DLT route failed (${dltData.status_code}): ${dltData.message}`)
       } catch (e: any) {
-        routeErrors.push({ route: 'dlt', statusCode: 0, message: e.message })
-        console.warn(`[Fast2SMS] DLT route error: ${e.message}`)
+        const errMsg = e.name === 'AbortError' ? 'Request timed out' : e.message
+        routeErrors.push({ route: 'dlt', statusCode: 0, message: errMsg })
+        console.warn(`[Fast2SMS] DLT route error: ${errMsg}`)
       }
-    }
-
-    // ─── Attempt 5: V1 Bulk API (legacy fallback) ───
-    console.log(`[Fast2SMS] Attempt 5: Legacy V1 bulk API for ${maskedPhone}`)
-
-    try {
-      const v1Response = await fetch('https://www.fast2sms.com/dev/bulk', {
-        method: 'POST',
-        headers: {
-          'authorization': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sender_id: 'FSTSMS',
-          message: otpMessage,
-          language: 'english',
-          route: 'p',
-          numbers: normalizedPhone,
-        }),
-      })
-
-      const v1Data = await v1Response.json()
-
-      if (v1Data.return === true) {
-        console.log(`[Fast2SMS] V1 route SUCCESS for ${maskedPhone}`)
-        return {
-          success: true,
-          message: 'OTP sent successfully via Fast2SMS (V1)',
-          provider: 'Fast2SMS',
-          deliveryId: v1Data.request_id || undefined,
-        }
-      }
-
-      routeErrors.push({ route: 'v1_bulk', statusCode: v1Data.status_code, message: v1Data.message })
-      console.warn(`[Fast2SMS] V1 route failed (${v1Data.status_code}): ${v1Data.message}`)
-    } catch (e: any) {
-      routeErrors.push({ route: 'v1_bulk', statusCode: 0, message: e.message })
-      console.warn(`[Fast2SMS] V1 route error: ${e.message}`)
     }
 
     // ─── All routes failed — determine the root cause ───
@@ -529,7 +504,7 @@ async function sendViaMSG91(phone: string, otp: string): Promise<SMSResult> {
       body.template_id = templateId
     }
 
-    const response = await fetch('https://control.msg91.com/api/v5/otp', {
+    const response = await fetchWithTimeout('https://control.msg91.com/api/v5/otp', {
       method: 'POST',
       headers: {
         'accept': 'application/json',
@@ -537,7 +512,7 @@ async function sendViaMSG91(phone: string, otp: string): Promise<SMSResult> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-    })
+    }, SMS_TIMEOUT_MS)
 
     const data = await response.json()
 
@@ -560,12 +535,13 @@ async function sendViaMSG91(phone: string, otp: string): Promise<SMSResult> {
       error: JSON.stringify(data),
     }
   } catch (error: any) {
-    console.error(`[MSG91] Network error for ${normalizedPhone}:`, error.message)
+    const errMsg = error.name === 'AbortError' ? 'Request timed out' : error.message
+    console.error(`[MSG91] Network error for ${normalizedPhone}:`, errMsg)
     return {
       success: false,
-      message: `MSG91 network error: ${error.message}`,
+      message: `MSG91 network error: ${errMsg}`,
       provider: 'MSG91',
-      error: error.message,
+      error: errMsg,
     }
   }
 }
@@ -584,7 +560,7 @@ async function sendViaConsole(phone: string, otp: string): Promise<SMSResult> {
   console.log(`  WARNING: No SMS provider configured! Set FAST2SMS_API_KEY or MSG91_AUTH_KEY`)
   console.log(`${'='.repeat(50)}\n`)
 
-  // CRITICAL FIX: In production, console fallback means OTP was NOT actually delivered.
+  // CRITICAL: In production, console fallback means OTP was NOT actually delivered.
   // Return success=false so the UI shows a proper error instead of misleading the user.
   if (isProduction) {
     return {
@@ -642,6 +618,8 @@ export async function sendOTPSMS(phone: string, otp: string): Promise<SMSResult>
     if (result.needsAccountSetup) {
       return result
     }
+  } else {
+    console.warn('[OTP] FAST2SMS_API_KEY is not set in environment variables!')
   }
 
   // ─── Try MSG91 (Fallback) ───
