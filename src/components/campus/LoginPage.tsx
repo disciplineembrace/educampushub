@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 
 type AuthTab = 'login' | 'register'
 type ForgotPasswordStep = 'none' | 'phone' | 'otp' | 'reset' | 'success'
+type RegStep = 'form' | 'otp'
 
 export default function LoginPage() {
   const { setCurrentPage, setCurrentUser } = useAppStore()
@@ -31,6 +32,10 @@ export default function LoginPage() {
   const [regPhone, setRegPhone] = useState('')
   const [regPassword, setRegPassword] = useState('')
   const [regConfirmPassword, setRegConfirmPassword] = useState('')
+  const [regStep, setRegStep] = useState<RegStep>('form')
+  const [regOtp, setRegOtp] = useState('')
+  const [regMaskedPhone, setRegMaskedPhone] = useState('')
+  const [regOtpResendTimer, setRegOtpResendTimer] = useState(0)
 
   // Forgot Password state
   const [forgotStep, setForgotStep] = useState<ForgotPasswordStep>('none')
@@ -47,13 +52,21 @@ export default function LoginPage() {
   const [forgotError, setForgotError] = useState('')
   const [otpResendTimer, setOtpResendTimer] = useState(0)
 
-  // OTP resend timer
+  // OTP resend timer (forgot password)
   useEffect(() => {
     if (otpResendTimer > 0) {
       const timer = setTimeout(() => setOtpResendTimer(otpResendTimer - 1), 1000)
       return () => clearTimeout(timer)
     }
   }, [otpResendTimer])
+
+  // OTP resend timer (registration)
+  useEffect(() => {
+    if (regOtpResendTimer > 0) {
+      const timer = setTimeout(() => setRegOtpResendTimer(regOtpResendTimer - 1), 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [regOtpResendTimer])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -103,6 +116,8 @@ export default function LoginPage() {
     }
   }
 
+  // ─── Registration with OTP ───
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -118,6 +133,16 @@ export default function LoginPage() {
     }
     if (!regEmail) {
       setError(t('login.error.emailRequired'))
+      return
+    }
+    if (!regPhone) {
+      setError(t('login.error.phoneRequired') || 'Phone number is required for OTP verification')
+      return
+    }
+    // Validate Indian phone format
+    const cleanedPhone = regPhone.replace(/\D/g, '')
+    if (cleanedPhone.length !== 10 && !(cleanedPhone.length === 12 && cleanedPhone.startsWith('91'))) {
+      setError(t('forgotPassword.error.phoneInvalid'))
       return
     }
     if (!regPassword) {
@@ -142,9 +167,72 @@ export default function LoginPage() {
       return
     }
 
+    // Step 1: Send OTP to phone number
     setLoading(true)
     try {
       const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_registration_otp',
+          phone: regPhone,
+          email: regEmail,
+        })
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        if (data.error?.includes('already registered') || data.error === 'Email already registered') {
+          setError(data.error.includes('phone') ? 'This phone number is already registered. Please login instead.' : t('login.error.emailExists'))
+        } else if (data.smsError) {
+          setError('Failed to send OTP. Please check your phone number and try again.')
+        } else {
+          setError(data.error || 'Failed to send OTP. Please try again.')
+        }
+        return
+      }
+
+      // OTP sent successfully, move to OTP step
+      setRegMaskedPhone(data.maskedPhone || '')
+      setRegStep('otp')
+      setRegOtpResendTimer(60)
+    } catch {
+      setError(t('login.error.wentWrong'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerifyRegOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+
+    if (!regOtp || regOtp.length !== 6) {
+      setError(t('forgotPassword.error.otpInvalid'))
+      return
+    }
+
+    setLoading(true)
+    try {
+      // First verify the OTP
+      const verifyRes = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify_registration_otp',
+          phone: regPhone,
+          otp: regOtp,
+        })
+      })
+      const verifyData = await verifyRes.json()
+
+      if (!verifyRes.ok) {
+        setError(verifyData.error || 'Invalid or expired OTP')
+        return
+      }
+
+      // OTP verified, now complete registration
+      const regRes = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -152,28 +240,53 @@ export default function LoginPage() {
           name: regName,
           email: regEmail,
           password: regPassword,
-          phone: regPhone || undefined,
+          phone: regPhone,
+        })
+      })
+      const regData = await regRes.json()
+
+      if (!regRes.ok) {
+        if (regData.error === 'Email already registered') {
+          setError(t('login.error.emailExists'))
+        } else {
+          setError(regData.error || t('login.error.wentWrong'))
+        }
+        return
+      }
+
+      setCurrentUser(regData.user)
+      setCurrentPage('home')
+    } catch {
+      setError(t('login.error.wentWrong'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendRegOtp = async () => {
+    if (regOtpResendTimer > 0) return
+    setError('')
+    setRegOtp('')
+
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_registration_otp',
+          phone: regPhone,
+          email: regEmail,
         })
       })
       const data = await res.json()
 
       if (!res.ok) {
-        if (data.error === 'Email already registered') {
-          setError(t('login.error.emailExists'))
-        } else if (data.error === 'Please enter a valid email') {
-          setError(t('login.error.invalidEmail'))
-        } else if (data.error === 'Password must be at least 8 characters') {
-          setError(t('login.error.passwordTooShort'))
-        } else if (data.error === 'Password must include uppercase, lowercase, number, and special character') {
-          setError(t('login.error.passwordWeak'))
-        } else {
-          setError(data.error || t('login.error.wentWrong'))
-        }
+        setError(data.error || 'Failed to resend OTP. Please try again.')
         return
       }
 
-      setCurrentUser(data.user)
-      setCurrentPage('home')
+      setRegOtpResendTimer(60)
     } catch {
       setError(t('login.error.wentWrong'))
     } finally {
@@ -867,9 +980,8 @@ export default function LoginPage() {
                     </p>
                   </motion.form>
                 ) : (
-                  <motion.form
+                  <motion.div
                     key="register"
-                    onSubmit={handleRegister}
                     className="space-y-4"
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -882,115 +994,210 @@ export default function LoginPage() {
                       </div>
                     )}
 
-                    <div>
-                      <Label className="mb-1.5 block">{t('login.label.name')}</Label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          type="text"
-                          value={regName}
-                          onChange={e => setRegName(e.target.value)}
-                          placeholder={t('login.placeholder.name')}
-                          required
-                          className="h-12 pl-10 rounded-xl"
-                        />
-                      </div>
-                    </div>
+                    {regStep === 'form' ? (
+                      <form onSubmit={handleRegister} className="space-y-4">
+                        <div>
+                          <Label className="mb-1.5 block">{t('login.label.name')}</Label>
+                          <div className="relative">
+                            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              type="text"
+                              value={regName}
+                              onChange={e => setRegName(e.target.value)}
+                              placeholder={t('login.placeholder.name')}
+                              required
+                              className="h-12 pl-10 rounded-xl"
+                            />
+                          </div>
+                        </div>
 
-                    <div>
-                      <Label className="mb-1.5 block">{t('login.label.collegeEmail')}</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          type="email"
-                          value={regEmail}
-                          onChange={e => setRegEmail(e.target.value)}
-                          placeholder={t('login.placeholder.email')}
-                          required
-                          className="h-12 pl-10 rounded-xl"
-                        />
-                      </div>
-                    </div>
+                        <div>
+                          <Label className="mb-1.5 block">{t('login.label.collegeEmail')}</Label>
+                          <div className="relative">
+                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              type="email"
+                              value={regEmail}
+                              onChange={e => setRegEmail(e.target.value)}
+                              placeholder={t('login.placeholder.email')}
+                              required
+                              className="h-12 pl-10 rounded-xl"
+                            />
+                          </div>
+                        </div>
 
-                    <div>
-                      <Label className="mb-1.5 block">{t('login.label.phone')}</Label>
-                      <div className="relative">
-                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          type="tel"
-                          value={regPhone}
-                          onChange={e => setRegPhone(e.target.value)}
-                          placeholder={t('login.placeholder.phone')}
-                          className="h-12 pl-10 rounded-xl"
-                        />
-                      </div>
-                    </div>
+                        <div>
+                          <Label className="mb-1.5 block">{t('login.label.phone')}</Label>
+                          <div className="relative">
+                            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              type="tel"
+                              value={regPhone}
+                              onChange={e => setRegPhone(e.target.value)}
+                              placeholder={t('login.placeholder.phone')}
+                              required
+                              className="h-12 pl-10 rounded-xl"
+                              maxLength={14}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1.5">OTP will be sent to verify your phone number</p>
+                        </div>
 
-                    <div>
-                      <Label className="mb-1.5 block">{t('login.label.password')}</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          type={showPassword ? 'text' : 'password'}
-                          value={regPassword}
-                          onChange={e => setRegPassword(e.target.value)}
-                          placeholder={t('login.placeholder.password')}
-                          required
-                          className="h-12 pl-10 pr-10 rounded-xl"
-                        />
+                        <div>
+                          <Label className="mb-1.5 block">{t('login.label.password')}</Label>
+                          <div className="relative">
+                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              type={showPassword ? 'text' : 'password'}
+                              value={regPassword}
+                              onChange={e => setRegPassword(e.target.value)}
+                              placeholder={t('login.placeholder.password')}
+                              required
+                              className="h-12 pl-10 pr-10 rounded-xl"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <Label className="mb-1.5 block">{t('login.label.confirmPassword')}</Label>
+                          <div className="relative">
+                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input
+                              type={showConfirmPassword ? 'text' : 'password'}
+                              value={regConfirmPassword}
+                              onChange={e => setRegConfirmPassword(e.target.value)}
+                              placeholder={t('login.placeholder.confirmPassword')}
+                              required
+                              className="h-12 pl-10 pr-10 rounded-xl"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <Button
+                          type="submit"
+                          disabled={loading}
+                          className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+                        >
+                          <span className="flex items-center gap-2">
+                            {loading ? 'Sending OTP...' : <>{t('login.button.register')} <ArrowRight className="w-4 h-4" /></>}
+                          </span>
+                        </Button>
+
+                        <p className="text-center text-sm text-muted-foreground">
+                          {t('login.hasAccount')}{' '}
+                          <button
+                            type="button"
+                            onClick={() => { setActiveTab('login'); setError('') }}
+                            className="text-brand font-semibold hover:underline"
+                          >
+                            {t('login.tabs.login')}
+                          </button>
+                        </p>
+                      </form>
+                    ) : (
+                      <form onSubmit={handleVerifyRegOtp} className="space-y-4">
+                        {/* OTP Verification Step */}
+                        <div className="text-center mb-4">
+                          <div className="w-12 h-12 rounded-xl bg-brand/10 flex items-center justify-center mx-auto mb-3">
+                            <ShieldCheck className="w-6 h-6 text-brand" />
+                          </div>
+                          <h3 className="text-lg font-bold text-foreground">{t('forgotPassword.verifyTitle')}</h3>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            OTP sent to {regMaskedPhone}
+                          </p>
+                        </div>
+
+                        <div>
+                          <Label className="mb-1.5 block">{t('forgotPassword.label.otp')}</Label>
+                          <div className="flex gap-2 justify-center">
+                            {Array.from({ length: 6 }).map((_, i) => (
+                              <Input
+                                key={`reg-otp-${i}`}
+                                id={`reg-otp-${i}`}
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={1}
+                                value={regOtp[i] || ''}
+                                onChange={e => {
+                                  const val = e.target.value.replace(/\D/g, '')
+                                  if (val) {
+                                    const newOtp = regOtp.split('')
+                                    newOtp[i] = val[0]
+                                    setRegOtp(newOtp.join(''))
+                                    const nextInput = document.getElementById(`reg-otp-${i + 1}`)
+                                    if (nextInput) nextInput.focus()
+                                  } else {
+                                    const newOtp = regOtp.split('')
+                                    newOtp[i] = ''
+                                    setRegOtp(newOtp.join(''))
+                                  }
+                                }}
+                                onKeyDown={e => {
+                                  if (e.key === 'Backspace' && !regOtp[i]) {
+                                    const prevInput = document.getElementById(`reg-otp-${i - 1}`)
+                                    if (prevInput) prevInput.focus()
+                                  }
+                                }}
+                                className="w-12 h-14 text-center text-xl font-bold rounded-xl"
+                              />
+                            ))}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-2 text-center">{t('forgotPassword.otpHint')}</p>
+                        </div>
+
+                        {/* Resend OTP */}
+                        <div className="text-center">
+                          {regOtpResendTimer > 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              {t('forgotPassword.resendIn', { seconds: regOtpResendTimer })}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleResendRegOtp}
+                              disabled={loading}
+                              className="text-sm text-brand hover:underline disabled:opacity-50"
+                            >
+                              {t('forgotPassword.resendOtp')}
+                            </button>
+                          )}
+                        </div>
+
+                        <Button
+                          type="submit"
+                          disabled={loading || regOtp.length !== 6}
+                          className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+                        >
+                          <span className="flex items-center gap-2">
+                            {loading ? 'Verifying & Registering...' : <>{t('forgotPassword.button.verifyOtp')} & Register <ArrowRight className="w-4 h-4" /></>}
+                          </span>
+                        </Button>
+
                         <button
                           type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() => { setRegStep('form'); setRegOtp(''); setError('') }}
+                          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-full justify-center transition-colors"
                         >
-                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          <ArrowLeft className="w-4 h-4" />
+                          Back to registration form
                         </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="mb-1.5 block">{t('login.label.confirmPassword')}</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          type={showConfirmPassword ? 'text' : 'password'}
-                          value={regConfirmPassword}
-                          onChange={e => setRegConfirmPassword(e.target.value)}
-                          placeholder={t('login.placeholder.confirmPassword')}
-                          required
-                          className="h-12 pl-10 pr-10 rounded-xl"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <Button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
-                    >
-                      <span className="flex items-center gap-2">
-                        {loading ? t('login.button.registering') : <>{t('login.button.register')} <ArrowRight className="w-4 h-4" /></>}
-                      </span>
-                    </Button>
-
-                    <p className="text-center text-sm text-muted-foreground">
-                      {t('login.hasAccount')}{' '}
-                      <button
-                        type="button"
-                        onClick={() => { setActiveTab('login'); setError('') }}
-                        className="text-brand font-semibold hover:underline"
-                      >
-                        {t('login.tabs.login')}
-                      </button>
-                    </p>
-                  </motion.form>
+                      </form>
+                    )}
+                  </motion.div>
                 )}
               </AnimatePresence>
 
