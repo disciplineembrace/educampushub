@@ -12,6 +12,7 @@ import {
   maskEmail,
   maskPhone,
 } from '@/lib/otp-utils'
+import { sendOTPEmail } from '@/lib/brevo-email'
 
 // ─── Rate Limiting for forgot-password endpoint ───
 
@@ -83,32 +84,43 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP({ email, phone: user.phone || undefined, otpCode: otp, purpose: 'admin_forgot_password' })
 
-      // Send OTP via Brevo Email (+ SMS if phone exists, but SMS is deprecated)
+      // Send OTP via Brevo Email - call sendOTPEmail directly for debugging
       console.log(`[ADMIN-FORGOT-PW] Sending OTP to ${email}, purpose=admin_forgot_password`)
-      const sendResult = await sendOTP({
-        email,
-        phone: user.phone || undefined,
-        otp,
+      
+      // Direct Brevo email call for debugging
+      const directEmailResult = await sendOTPEmail({
+        to: email,
+        otp: otp,
         purpose: 'admin_forgot_password',
         userName: user.name,
+        expiryMinutes: 5,
       })
-      console.log(`[ADMIN-FORGOT-PW] Send result: emailSent=${sendResult.emailSent}, smsSent=${sendResult.smsSent}, message=${sendResult.message}`)
+      console.log(`[ADMIN-FORGOT-PW] Direct email result:`, JSON.stringify(directEmailResult))
+      
+      const emailSent = directEmailResult.success
+      const smsSent = false
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
 
       const maskedPhone = user.phone ? maskPhone(user.phone) : null
 
+      let message = ''
+      if (emailSent) {
+        message = 'OTP sent to your email'
+      } else {
+        message = 'OTP could not be delivered. Please try again.'
+      }
+
       return NextResponse.json({
         success: true,
-        message: sendResult.message,
+        message,
         maskedPhone,
         maskedEmail: maskEmail(email),
-        emailSent: sendResult.emailSent,
-        smsSent: sendResult.smsSent,
-        // Always return debug OTP for now to diagnose the issue
+        emailSent,
+        smsSent,
         _debug_otp: otp,
-        _debug_email_result: sendResult,
+        _debug_email_detail: directEmailResult,
       })
     }
 
