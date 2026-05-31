@@ -26,7 +26,7 @@ interface EmailResult {
 interface OTPEmailParams {
   to: string
   otp: string
-  purpose: 'login' | 'register' | 'forgot_password' | 'admin_forgot_password'
+  purpose: 'forgot_password' | 'admin_login' | 'admin_forgot_password'
   userName?: string
   expiryMinutes?: number
 }
@@ -37,29 +37,24 @@ function getOTPEmailHTML(params: OTPEmailParams): string {
   const { otp, purpose, userName, expiryMinutes = 5 } = params
 
   const purposeConfig: Record<string, { title: string; greeting: string; body: string }> = {
-    login: {
-      title: 'Login Verification Code',
-      greeting: userName ? `Hello ${userName},` : 'Hello,',
-      body: 'You are logging into your EduCampusHub account. Please use the verification code below to complete your login.',
-    },
-    register: {
-      title: 'Verify Your Email Address',
-      greeting: userName ? `Welcome ${userName}!` : 'Welcome!',
-      body: 'Thank you for creating your EduCampusHub account. Please verify your email address by entering the code below.',
-    },
     forgot_password: {
       title: 'Reset Your Password',
       greeting: userName ? `Hello ${userName},` : 'Hello,',
       body: 'You requested to reset your password. Use the verification code below to proceed. If you did not make this request, you can safely ignore this email.',
     },
+    admin_login: {
+      title: 'Admin Login Verification Code',
+      greeting: userName ? `Hello ${userName},` : 'Hello,',
+      body: 'You are logging into the EduCampusHub Admin Panel. Please use the verification code below to complete your login. If you did not attempt this login, please secure your account immediately.',
+    },
     admin_forgot_password: {
       title: 'Admin Password Reset Code',
       greeting: userName ? `Hello ${userName},` : 'Hello,',
-      body: 'You requested to reset your admin password. Use the verification code below to proceed.',
+      body: 'You requested to reset your admin password. Use the verification code below to proceed. If you did not make this request, you can safely ignore this email.',
     },
   }
 
-  const config = purposeConfig[purpose] || purposeConfig.login
+  const config = purposeConfig[purpose] || purposeConfig.forgot_password
 
   return `
 <!DOCTYPE html>
@@ -171,9 +166,8 @@ function getOTPEmailText(params: OTPEmailParams): string {
   const { otp, purpose, userName, expiryMinutes = 5 } = params
 
   const purposeText: Record<string, string> = {
-    login: 'login verification',
-    register: 'email verification',
     forgot_password: 'password reset',
+    admin_login: 'admin login verification',
     admin_forgot_password: 'admin password reset',
   }
 

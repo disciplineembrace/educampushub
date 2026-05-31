@@ -27,7 +27,7 @@ const otpVerifyAttempts = new Map<string, number>()
 
 // ─── OTP Purpose Types ───
 
-export type OTPPurpose = 'login' | 'register' | 'forgot_password' | 'admin_forgot_password'
+export type OTPPurpose = 'forgot_password' | 'admin_login' | 'admin_forgot_password'
 
 // ─── OTP Generation ───
 

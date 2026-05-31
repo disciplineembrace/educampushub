@@ -33,7 +33,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
   const [twoFactorOtpValue, setTwoFactorOtpValue] = useState('')
   const [twoFactorLoading, setTwoFactorLoading] = useState(false)
   const [twoFactorError, setTwoFactorError] = useState('')
-  const [twoFactorMaskedPhone, setTwoFactorMaskedPhone] = useState('')
+  const [twoFactorMaskedEmail, setTwoFactorMaskedEmail] = useState('')
   const [twoFactorOtpSent, setTwoFactorOtpSent] = useState(false)
   const [twoFactorResendTimer, setTwoFactorResendTimer] = useState(0)
 
@@ -41,7 +41,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
   const [forgotError, setForgotError] = useState('')
-  const [maskedPhone, setMaskedPhone] = useState('')
+  const [maskedEmail, setMaskedEmail] = useState('')
   const [otpValue, setOtpValue] = useState('')
   const [otpLoading, setOtpLoading] = useState(false)
   const [otpError, setOtpError] = useState('')
@@ -153,7 +153,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
         return
       }
 
-      setTwoFactorMaskedPhone(data.maskedPhone || '')
+      setTwoFactorMaskedEmail(data.maskedEmail || '')
       setTwoFactorOtpSent(true)
       setTwoFactorResendTimer(60)
     } catch {
@@ -245,7 +245,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
         return
       }
 
-      setMaskedPhone(data.maskedPhone || '')
+      setMaskedEmail(data.maskedEmail || '')
       setOtpResendTimer(60) // 60-second cooldown
       setOtpValue('')
       setOtpError('')
@@ -628,15 +628,15 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
             </h1>
             <p className="text-sm text-slate-400 text-center mb-2">
               {twoFactorAdmin.isSuperAdmin
-                ? 'Super Admin requires OTP verification on every login'
-                : 'OTP verification is required for your account'
+                ? 'Super Admin requires email OTP verification on every login'
+                : 'Email OTP verification is required for admin login'
               }
             </p>
 
-            {twoFactorMaskedPhone && (
+            {twoFactorMaskedEmail && (
               <div className="flex items-center justify-center gap-1.5 mb-6">
-                <Phone className="w-3.5 h-3.5 text-[#FF6600]" />
-                <span className="text-sm font-medium text-[#FF6600]">{twoFactorMaskedPhone}</span>
+                <Mail className="w-3.5 h-3.5 text-[#FF6600]" />
+                <span className="text-sm font-medium text-[#FF6600]">{twoFactorMaskedEmail}</span>
               </div>
             )}
 
@@ -649,7 +649,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
                     onClick={() => send2FAOTP(twoFactorAdmin.email)}
                     className="bg-[#FF6600] hover:bg-[#FF8533] text-white font-medium rounded-xl"
                   >
-                    Send OTP to Registered Phone
+                    Send OTP to Email
                   </Button>
                 )}
               </div>
@@ -769,7 +769,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
                     Forgot Password?
                   </h1>
                   <p className="text-sm text-slate-400 text-center mb-6">
-                    Enter your admin email to receive an OTP on your registered phone
+                    Enter your admin email to receive an OTP
                   </p>
 
                   <form onSubmit={handleSendOTP} className="space-y-4">
@@ -831,8 +831,8 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
                     Enter the 6-digit code sent to
                   </p>
                   <div className="flex items-center justify-center gap-1.5 mb-6">
-                    <Phone className="w-3.5 h-3.5 text-[#FF6600]" />
-                    <span className="text-sm font-medium text-[#FF6600]">{maskedPhone}</span>
+                    <Mail className="w-3.5 h-3.5 text-[#FF6600]" />
+                    <span className="text-sm font-medium text-[#FF6600]">{maskedEmail}</span>
                   </div>
 
                   <form onSubmit={handleVerifyOTP} className="space-y-4">

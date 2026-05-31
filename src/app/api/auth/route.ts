@@ -3,15 +3,6 @@ import { NextResponse } from 'next/server'
 import { checkApiRateLimit, isValidEmail, sanitizeString } from '@/lib/api-security'
 import bcrypt from 'bcryptjs'
 import { createHmac, randomUUID } from 'crypto'
-import {
-  generateOTP,
-  storeOTP,
-  verifyOTP,
-  sendOTP,
-  checkOTPRateLimit,
-  cleanupExpiredOTPs,
-  maskEmail,
-} from '@/lib/otp-utils'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'educampushub-insecure-dev-secret-change-me'
 
@@ -80,7 +71,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { action } = body
 
-    // ─── REGISTER ─────────────────────────────────────────────
+    // ─── REGISTER (No OTP required — direct email + password signup) ───
     if (action === 'register') {
       const { name, email, password, phone } = body
 
@@ -121,14 +112,14 @@ export async function POST(request: Request) {
       // Hash password with bcrypt (12 rounds)
       const passwordHash = await bcrypt.hash(password, 12)
 
-      // Create user
+      // Create user (directly verified since no OTP needed)
       const user = await db.user.create({
         data: {
           email: sanitizedEmail,
           name: sanitizedName,
           phone: phone ? sanitizeString(phone.trim(), 20) : null,
           passwordHash,
-          isVerified: false,
+          isVerified: true,
         },
       })
 
@@ -155,7 +146,7 @@ export async function POST(request: Request) {
       return response
     }
 
-    // ─── LOGIN ────────────────────────────────────────────────
+    // ─── LOGIN (Email/username + password only, No OTP) ───
     if (action === 'login') {
       const { email, password } = body
 
@@ -186,6 +177,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'This account has been banned' }, { status: 403 })
       }
 
+      // Prevent admin login through user portal
+      if (user.isAdmin) {
+        return NextResponse.json({ error: 'Admin accounts must use the admin login panel' }, { status: 403 })
+      }
+
       // Create session
       const token = await createUserSession(user.id, request)
 
@@ -208,226 +204,7 @@ export async function POST(request: Request) {
       return response
     }
 
-    // ─── SEND LOGIN OTP (Phone-based login) ──────────────────
-    if (action === 'send_login_otp') {
-      const { phone } = body
-
-      if (!phone || typeof phone !== 'string') {
-        return NextResponse.json({ error: 'Phone number is required' }, { status: 400 })
-      }
-
-      const cleanedPhone = phone.replace(/\D/g, '')
-      const normalizedPhone = cleanedPhone.length === 12 ? cleanedPhone.slice(2) : cleanedPhone
-
-      if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
-        return NextResponse.json({ error: 'Please enter a valid 10-digit Indian mobile number' }, { status: 400 })
-      }
-
-      // Find user by phone
-      const user = await db.user.findFirst({ where: { phone: normalizedPhone } })
-      if (!user || !user.passwordHash) {
-        // Don't reveal if phone exists — but give a hint for better UX
-        return NextResponse.json({ error: 'No account found with this phone number. Please register first.' }, { status: 404 })
-      }
-
-      if (user.isBanned) {
-        return NextResponse.json({ error: 'This account has been banned' }, { status: 403 })
-      }
-
-      // Check OTP rate limit
-      const rateLimit = checkOTPRateLimit(user.email)
-      if (!rateLimit.allowed) {
-        return NextResponse.json({ error: rateLimit.reason, retryAfterMs: rateLimit.retryAfterMs }, { status: 429 })
-      }
-
-      // Generate and store OTP
-      const otp = generateOTP()
-      await storeOTP({ email: user.email, phone: normalizedPhone, otpCode: otp, purpose: 'login' })
-
-      // Send OTP via email (Brevo)
-      const sendResult = await sendOTP({ email: user.email, phone: normalizedPhone, otp, purpose: 'login', userName: user.name })
-
-      // Cleanup expired OTPs
-      cleanupExpiredOTPs().catch(() => {})
-
-      // Mask email for response
-      const maskedEmailAddress = maskEmail(user.email)
-
-      if (!sendResult.emailSent) {
-        console.error(`[Login OTP] Email delivery failed for ${user.email}: ${sendResult.message}`)
-        return NextResponse.json({
-          error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
-          emailError: true,
-        }, { status: 503 })
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `OTP sent to ${maskedEmailAddress}`,
-        maskedEmail: maskedEmailAddress,
-        ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
-      })
-    }
-
-    // ─── VERIFY LOGIN OTP (Phone-based login) ─────────────────
-    if (action === 'verify_login_otp') {
-      const { phone, otp } = body
-
-      if (!phone || !otp) {
-        return NextResponse.json({ error: 'Phone number and OTP are required' }, { status: 400 })
-      }
-
-      const cleanedPhone = phone.replace(/\D/g, '')
-      const normalizedPhone = cleanedPhone.length === 12 ? cleanedPhone.slice(2) : cleanedPhone
-
-      // Find user by phone
-      const user = await db.user.findFirst({ where: { phone: normalizedPhone } })
-      if (!user) {
-        return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
-      }
-
-      // Verify OTP using user's email
-      const result = await verifyOTP(user.email, otp, 'login')
-
-      if (!result.valid) {
-        return NextResponse.json({ error: result.reason || 'Invalid or expired OTP' }, { status: 400 })
-      }
-
-      // OTP verified — create session and log user in
-      const token = await createUserSession(user.id, request)
-      const safeUser = sanitizeUser(user as unknown as Record<string, unknown>)
-
-      const response = NextResponse.json({
-        user: safeUser,
-        token,
-        message: 'Login successful!',
-      })
-
-      response.cookies.set('session_token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60,
-        path: '/',
-      })
-
-      return response
-    }
-
-    // ─── SEND REGISTRATION OTP ───────────────────────────────
-    if (action === 'send_registration_otp') {
-      const { phone, email } = body
-
-      if (!phone || typeof phone !== 'string') {
-        return NextResponse.json({ error: 'Phone number is required for OTP verification' }, { status: 400 })
-      }
-
-      // Validate Indian phone format
-      const cleanedPhone = phone.replace(/\D/g, '')
-      const normalizedPhone = cleanedPhone.length === 12 ? cleanedPhone.slice(2) : cleanedPhone
-
-      if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
-        return NextResponse.json({ error: 'Please enter a valid 10-digit Indian mobile number' }, { status: 400 })
-      }
-
-      // Check if phone already registered
-      const existingPhone = await db.user.findFirst({ where: { phone: normalizedPhone } })
-      if (existingPhone) {
-        return NextResponse.json({ error: 'This phone number is already registered. Please login instead.' }, { status: 409 })
-      }
-
-      // If email provided, check if already registered
-      const regEmail = email?.toLowerCase().trim()
-      if (regEmail) {
-        const existingEmail = await db.user.findUnique({ where: { email: regEmail } })
-        if (existingEmail) {
-          return NextResponse.json({ error: 'Email already registered' }, { status: 409 })
-        }
-      }
-
-      // Check OTP rate limit
-      const regRateLimit = checkOTPRateLimit(regEmail || normalizedPhone)
-      if (!regRateLimit.allowed) {
-        return NextResponse.json({ error: regRateLimit.reason, retryAfterMs: regRateLimit.retryAfterMs }, { status: 429 })
-      }
-
-      // Generate and store OTP (use a temporary email placeholder)
-      const tempEmail = regEmail || `phone_${normalizedPhone}@temp.registration`
-      const otp = generateOTP()
-      await storeOTP({ email: tempEmail, phone: normalizedPhone, otpCode: otp, purpose: 'register' })
-
-      // Send OTP via email (Brevo) — only if a real email was provided
-      if (regEmail) {
-        const sendResult = await sendOTP({ email: regEmail, phone: normalizedPhone, otp, purpose: 'register' })
-        cleanupExpiredOTPs().catch(() => {})
-
-        const maskedEmailAddress = maskEmail(regEmail)
-
-        if (!sendResult.emailSent) {
-          console.error(`[Registration] Email delivery failed for ${regEmail}: ${sendResult.message}`)
-          return NextResponse.json({
-            error: `Failed to send OTP to ${maskedEmailAddress}. ${sendResult.message}`,
-            emailError: true,
-          }, { status: 503 })
-        }
-
-        return NextResponse.json({
-          success: true,
-          message: `OTP sent to ${maskedEmailAddress}`,
-          maskedEmail: maskedEmailAddress,
-          ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
-        })
-      }
-
-      // No real email provided — cannot send OTP via email
-      cleanupExpiredOTPs().catch(() => {})
-      return NextResponse.json({
-        error: 'Email is required for OTP verification. Please provide your email address.',
-      }, { status: 400 })
-    }
-
-    // ─── VERIFY REGISTRATION OTP ───────────────────────────────
-    if (action === 'verify_registration_otp') {
-      const { phone, otp } = body
-
-      if (!phone || !otp) {
-        return NextResponse.json({ error: 'Phone number and OTP are required' }, { status: 400 })
-      }
-
-      const cleanedPhone = phone.replace(/\D/g, '')
-      const normalizedPhone = cleanedPhone.length === 12 ? cleanedPhone.slice(2) : cleanedPhone
-
-      // Find OTP record by phone (using temp email pattern)
-      const tempEmail = `phone_${normalizedPhone}@temp.registration`
-
-      // Try with temp email first, then try to find by phone directly
-      let result = await verifyOTP(tempEmail, otp, 'register')
-
-      // If not found with temp email, try finding OTP by phone in DB
-      if (!result.valid) {
-        const neonSql = getNeonSql()
-        const otpRecords = await neonSql`
-          SELECT email FROM "PasswordResetOTP"
-          WHERE phone = ${normalizedPhone} AND "otpCode" = ${otp} AND "isVerified" = false AND "usedAt" IS NULL
-          ORDER BY "createdAt" DESC LIMIT 1
-        `
-        if (otpRecords?.[0]) {
-          result = await verifyOTP(otpRecords[0].email, otp, 'register')
-        }
-      }
-
-      if (!result.valid) {
-        return NextResponse.json({ error: result.reason || 'Invalid or expired OTP' }, { status: 400 })
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Phone number verified successfully',
-        verificationToken: result.recordId,
-      })
-    }
-
-    // ─── LOGOUT ───────────────────────────────────────────────
+    // ─── LOGOUT ───
     if (action === 'logout') {
       const { token } = body
 
@@ -456,44 +233,8 @@ export async function POST(request: Request) {
       return response
     }
 
-    // ─── DEFAULT (backward compat: email-only flow) ───────────
-    const { email } = body
-
-    if (!email) {
-      return NextResponse.json({ error: 'Email is required' }, { status: 400 })
-    }
-
-    // Validate email format
-    if (!isValidEmail(email)) {
-      return NextResponse.json({ error: 'Invalid email format' }, { status: 400 })
-    }
-
-    // Sanitize email
-    const sanitizedEmail = email.toLowerCase().trim()
-
-    let user = await db.user.findUnique({ where: { email: sanitizedEmail } })
-
-    if (!user) {
-      // Create new user with sanitized name from email
-      const nameFromEmail = sanitizeString(
-        sanitizedEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-        100
-      )
-      user = await db.user.create({
-        data: {
-          email: sanitizedEmail,
-          name: nameFromEmail,
-        }
-      })
-    }
-
-    if (user.isBanned) {
-      return NextResponse.json({ error: 'Account has been banned' }, { status: 403 })
-    }
-
-    const safeUser = sanitizeUser(user as unknown as Record<string, unknown>)
-
-    return NextResponse.json({ user: safeUser })
+    // ─── Invalid Action ───
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
   } catch (error) {
     console.error('Auth error:', error)
     return NextResponse.json({ error: 'Authentication failed' }, { status: 500 })

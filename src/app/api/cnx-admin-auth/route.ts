@@ -93,9 +93,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Account is banned' }, { status: 403 })
       }
 
-      // Only for Super Admin or 2FA-enabled accounts
-      if (!user.twoFactorEnabled && !user.isSuperAdmin && user.adminRole !== 'super_admin') {
-        return NextResponse.json({ error: '2FA not required for this account' }, { status: 400 })
+      // All admin accounts require OTP verification (Admin + Super Admin)
+      if (!user.isAdmin) {
+        return NextResponse.json({ error: 'OTP verification is for admin accounts only' }, { status: 400 })
       }
 
       // Check rate limit
@@ -106,10 +106,10 @@ export async function POST(request: Request) {
 
       // Generate and store OTP
       const otp = generateOTP()
-      await storeOTP({ email, phone: user.phone || undefined, otpCode: otp, purpose: 'login' })
+      await storeOTP({ email, otpCode: otp, purpose: 'admin_login' })
 
       // Send OTP via email (Brevo)
-      const sendResult = await sendOTP({ email, phone: user.phone || undefined, otp, purpose: 'login', userName: user.name })
+      const sendResult = await sendOTP({ email, otp, purpose: 'admin_login', userName: user.name })
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
@@ -157,7 +157,7 @@ export async function POST(request: Request) {
       }
 
       // Verify OTP
-      const result = await verifyOTP(email, otpCode, 'login')
+      const result = await verifyOTP(email, otpCode, 'admin_login')
       if (!result.valid) {
         // Track failed attempt
         const otpRecords = await getNeonSql()`
@@ -200,7 +200,7 @@ export async function POST(request: Request) {
       await sql`
         INSERT INTO "AuditLog" (id, "actorId", action, "targetType", "targetId", details, "ipAddress", "createdAt")
         VALUES (gen_random_uuid(), ${user.id}, '2fa_login_success', 'user', ${user.id},
-        ${JSON.stringify({ method: 'mobile_otp' })}, ${ip}, CURRENT_TIMESTAMP)
+        ${JSON.stringify({ method: 'email_otp' })}, ${ip}, CURRENT_TIMESTAMP)
       `
 
       // Delete the used OTP record
@@ -282,7 +282,8 @@ export async function POST(request: Request) {
 
     const role = (user.adminRole || 'support_admin') as AdminRole
     const isSuperAdmin = user.isSuperAdmin || user.adminRole === 'super_admin'
-    const requires2FA = user.twoFactorEnabled || isSuperAdmin
+    // All admin accounts require OTP verification
+    const requires2FA = true
 
     // ─── If Super Admin or 2FA enabled, require OTP before granting full access ───
     if (requires2FA) {

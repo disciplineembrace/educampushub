@@ -207,7 +207,7 @@ model PasswordResetOTP {
   email      String                                    // user/admin email
   phone      String?                                   // phone number (optional for email OTP)
   otpCode    String                                    // 6-digit OTP
-  purpose    String   @default("admin_forgot_password") // "login" | "register" | "forgot_password" | "admin_forgot_password"
+  purpose    String   @default("forgot_password") // "forgot_password" | "admin_login" | "admin_forgot_password"
   isVerified Boolean  @default(false)                  // whether OTP was successfully verified
   expiresAt  DateTime                                  // 5-minute expiry
   createdAt  DateTime  @default(now())
