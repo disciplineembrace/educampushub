@@ -19,10 +19,10 @@ export function middleware(request: NextRequest) {
     [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' https://fonts.gstatic.com",
-      "connect-src 'self' https:",
+      "connect-src 'self' https: wss:",
       "frame-ancestors 'none'",
     ].join('; ')
   )
