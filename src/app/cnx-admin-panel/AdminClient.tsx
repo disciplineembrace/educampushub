@@ -6,7 +6,8 @@ import {
   LayoutDashboard, Users, BookOpen, AlertTriangle, FileText, LogOut,
   RefreshCw, Trash2, Ban, BadgeCheck, Star, Eye, TrendingUp,
   Shield, ChevronRight, Clock, MoreVertical, CheckCircle2, XCircle, X,
-  Crown, UserCog, HeadphonesIcon, Search, CreditCard, IndianRupee, Image as ImageIcon
+  Crown, UserCog, HeadphonesIcon, Search, CreditCard, IndianRupee, Image as ImageIcon,
+  Pencil, PackageCheck, PackageX, Zap, FileDigit, UserX, ListX, Save, EyeOff
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +15,12 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -56,6 +63,7 @@ interface UserItem {
   email: string
   college: string | null
   city: string | null
+  phone?: string | null
   isVerified: boolean
   isBanned: boolean
   isAdmin: boolean
@@ -78,9 +86,27 @@ interface ListingItem {
   isFeatured: boolean
   isVerified: boolean
   isSold: boolean
+  isUrgent?: boolean
+  isDigital?: boolean
   views: number
   createdAt: string
   seller: { id: string; name: string; email: string; college: string | null }
+}
+
+interface ListingDetail extends ListingItem {
+  subcategory: string | null
+  course: string | null
+  semester: string | null
+  standard: string | null
+  board: string | null
+  college: string | null
+  whatsappNumber: string
+  isUrgent: boolean
+  isDigital: boolean
+  fileUrl: string | null
+  images: string
+  saves: number
+  updatedAt: string
 }
 
 interface ReportItem {
@@ -117,6 +143,30 @@ interface PaymentItem {
   verifiedAt: string | null
   createdAt: string
   user: { id: string; name: string; email: string; college: string | null }
+}
+
+interface ListingEditForm {
+  title: string
+  description: string
+  originalPrice: number
+  sellingPrice: number
+  category: string
+  city: string
+  condition: string
+  isFeatured: boolean
+  isVerified: boolean
+  isSold: boolean
+  isUrgent: boolean
+  isDigital: boolean
+}
+
+interface UserEditForm {
+  name: string
+  email: string
+  college: string
+  city: string
+  phone: string
+  isVerified: boolean
 }
 
 // ─── Role Badge ───────────────────────────────────────────────────
@@ -185,6 +235,20 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   const [searchTerm, setSearchTerm] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
+  // Modal states
+  const [showListingModal, setShowListingModal] = useState(false)
+  const [selectedListing, setSelectedListing] = useState<ListingDetail | null>(null)
+  const [listingEditMode, setListingEditMode] = useState(false)
+  const [listingEditForm, setListingEditForm] = useState<ListingEditForm | null>(null)
+  const [listingLoading, setListingLoading] = useState(false)
+
+  const [showUserModal, setShowUserModal] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<UserItem | null>(null)
+  const [userEditMode, setUserEditMode] = useState(false)
+  const [userEditForm, setUserEditForm] = useState<UserEditForm | null>(null)
+  const [userListings, setUserListings] = useState<ListingItem[]>([])
+  const [userListingsLoading, setUserListingsLoading] = useState(false)
+
   // Fetch data from protected admin API
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -250,11 +314,162 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         fetchData()
         if (activeTab === 'audit') fetchAuditLogs()
         if (activeTab === 'payments') fetchPayments()
+        // Close modals if action affects current selection
+        if (selectedListing && (action === 'delete_listing' || targetId === selectedListing.id)) {
+          refreshListingDetail(targetId)
+        }
+        if (selectedUser && (action.startsWith('delete_user') || targetId === selectedUser.id)) {
+          refreshUserDetail(targetId)
+        }
       } else {
         toast.error(data.error || 'Action failed')
       }
     } catch {
       toast.error('Network error')
+    }
+  }
+
+  // Admin action with updates object (for edit operations)
+  const adminActionWithUpdates = async (action: string, targetId: string, updates: Record<string, unknown>) => {
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, targetId, updates }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Action completed: ${action.replace(/_/g, ' ')}`)
+        fetchData()
+        if (activeTab === 'audit') fetchAuditLogs()
+        return true
+      } else {
+        toast.error(data.error || 'Action failed')
+        return false
+      }
+    } catch {
+      toast.error('Network error')
+      return false
+    }
+  }
+
+  // Refresh listing detail after actions
+  const refreshListingDetail = async (listingId: string) => {
+    try {
+      const res = await fetch(`/api/cnx-admin?type=listing-detail&id=${listingId}`)
+      if (res.ok) {
+        const d = await res.json()
+        setSelectedListing(d.listing)
+        if (listingEditMode && listingEditForm) {
+          setListingEditForm({
+            title: d.listing.title,
+            description: d.listing.description,
+            originalPrice: d.listing.originalPrice,
+            sellingPrice: d.listing.sellingPrice,
+            category: d.listing.category,
+            city: d.listing.city,
+            condition: d.listing.condition,
+            isFeatured: d.listing.isFeatured,
+            isVerified: d.listing.isVerified,
+            isSold: d.listing.isSold,
+            isUrgent: d.listing.isUrgent,
+            isDigital: d.listing.isDigital,
+          })
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Refresh user detail after actions
+  const refreshUserDetail = async (userId: string) => {
+    try {
+      const res = await fetch(`/api/cnx-admin?type=users`)
+      if (res.ok) {
+        const d = await res.json()
+        const updated = (d.users || []).find((u: UserItem) => u.id === userId)
+        if (updated) setSelectedUser(updated)
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Open listing detail modal
+  const openListingModal = async (listingId: string) => {
+    setListingLoading(true)
+    setShowListingModal(true)
+    setListingEditMode(false)
+    try {
+      const res = await fetch(`/api/cnx-admin?type=listing-detail&id=${listingId}`)
+      if (res.ok) {
+        const d = await res.json()
+        const listing = d.listing as ListingDetail
+        setSelectedListing(listing)
+        setListingEditForm({
+          title: listing.title,
+          description: listing.description,
+          originalPrice: listing.originalPrice,
+          sellingPrice: listing.sellingPrice,
+          category: listing.category,
+          city: listing.city,
+          condition: listing.condition,
+          isFeatured: listing.isFeatured,
+          isVerified: listing.isVerified,
+          isSold: listing.isSold,
+          isUrgent: listing.isUrgent,
+          isDigital: listing.isDigital,
+        })
+      }
+    } catch {
+      toast.error('Failed to load listing details')
+    } finally {
+      setListingLoading(false)
+    }
+  }
+
+  // Open user detail modal
+  const openUserModal = async (user: UserItem) => {
+    setSelectedUser(user)
+    setShowUserModal(true)
+    setUserEditMode(false)
+    setUserEditForm({
+      name: user.name,
+      email: user.email,
+      college: user.college || '',
+      city: user.city || '',
+      phone: user.phone || '',
+      isVerified: user.isVerified,
+    })
+    // Fetch user's listings
+    setUserListingsLoading(true)
+    try {
+      const res = await fetch(`/api/cnx-admin?type=user-listings&id=${user.id}`)
+      if (res.ok) {
+        const d = await res.json()
+        setUserListings(d.listings || [])
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setUserListingsLoading(false)
+    }
+  }
+
+  // Save listing edits
+  const saveListingEdits = async () => {
+    if (!selectedListing || !listingEditForm) return
+    const success = await adminActionWithUpdates('edit_listing', selectedListing.id, listingEditForm)
+    if (success) {
+      setListingEditMode(false)
+      refreshListingDetail(selectedListing.id)
+    }
+  }
+
+  // Save user edits
+  const saveUserEdits = async () => {
+    if (!selectedUser || !userEditForm) return
+    const success = await adminActionWithUpdates('edit_user', selectedUser.id, userEditForm)
+    if (success) {
+      setUserEditMode(false)
+      refreshUserDetail(selectedUser.id)
     }
   }
 
@@ -333,7 +548,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         </div>
 
         {/* Nav items */}
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {sidebarItems.map(item => (
             <button
               key={item.id}
@@ -432,13 +647,13 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
               transition={{ duration: 0.2 }}
             >
               {activeTab === 'overview' && (
-                <OverviewTab stats={stats} loading={loading} onAction={adminAction} />
+                <OverviewTab stats={stats} loading={loading} onAction={adminAction} onOpenListing={openListingModal} />
               )}
               {activeTab === 'users' && (
-                <UsersTab users={filteredUsers} loading={loading} onAction={adminAction} />
+                <UsersTab users={filteredUsers} loading={loading} onAction={adminAction} onOpenUser={openUserModal} adminId={admin.id} />
               )}
               {activeTab === 'listings' && (
-                <ListingsTab listings={filteredListings} loading={loading} onAction={adminAction} />
+                <ListingsTab listings={filteredListings} loading={loading} onAction={adminAction} onOpenListing={openListingModal} />
               )}
               {activeTab === 'reports' && (
                 <ReportsTab reports={filteredReports} loading={loading} onAction={adminAction} />
@@ -461,13 +676,682 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
           onClick={() => setSidebarOpen(false)}
         />
       )}
+
+      {/* Listing Detail/Edit Modal */}
+      <AnimatePresence>
+        {showListingModal && (
+          <ListingDetailModal
+            listing={selectedListing}
+            editMode={listingEditMode}
+            editForm={listingEditForm}
+            loading={listingLoading}
+            onSetEditMode={setListingEditMode}
+            onSetEditForm={setListingEditForm}
+            onSave={saveListingEdits}
+            onAction={adminAction}
+            onClose={() => { setShowListingModal(false); setSelectedListing(null); setListingEditMode(false) }}
+            onRefresh={() => selectedListing && refreshListingDetail(selectedListing.id)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* User Detail/Edit Modal */}
+      <AnimatePresence>
+        {showUserModal && selectedUser && (
+          <UserDetailModal
+            user={selectedUser}
+            editMode={userEditMode}
+            editForm={userEditForm}
+            userListings={userListings}
+            userListingsLoading={userListingsLoading}
+            onSetEditMode={setUserEditMode}
+            onSetEditForm={setUserEditForm}
+            onSave={saveUserEdits}
+            onAction={adminAction}
+            onOpenListing={openListingModal}
+            onClose={() => { setShowUserModal(false); setSelectedUser(null); setUserEditMode(false) }}
+            onRefresh={() => refreshUserDetail(selectedUser.id)}
+            adminId={admin.id}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  )
+}
+
+// ─── Listing Detail Modal ─────────────────────────────────────────
+
+function ListingDetailModal({
+  listing, editMode, editForm, loading, onSetEditMode, onSetEditForm, onSave, onAction, onClose, onRefresh
+}: {
+  listing: ListingDetail | null
+  editMode: boolean
+  editForm: ListingEditForm | null
+  loading: boolean
+  onSetEditMode: (v: boolean) => void
+  onSetEditForm: (v: ListingEditForm) => void
+  onSave: () => void
+  onAction: (a: string, t: string) => void
+  onClose: () => void
+  onRefresh: () => void
+}) {
+  if (loading || !listing || !editForm) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        onClick={onClose}
+      >
+        <div className="w-full max-w-2xl max-h-[90vh] bg-slate-900 border border-slate-700 rounded-2xl p-6 animate-pulse" onClick={e => e.stopPropagation()}>
+          <div className="h-8 bg-slate-800 rounded mb-4" />
+          <div className="space-y-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-10 bg-slate-800 rounded" />
+            ))}
+          </div>
+        </div>
+      </motion.div>
+    )
+  }
+
+  const parsedImages: string[] = (() => {
+    try {
+      return JSON.parse(listing.images || '[]')
+    } catch {
+      return []
+    }
+  })()
+
+  const conditionOptions = ['New', 'Like New', 'Good', 'Fair', 'Poor']
+  const categoryOptions = CATEGORIES.map(c => ({ id: c.id, name: c.name }))
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 20 }}
+        className="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl my-8"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-800">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-bold text-slate-100 truncate">{editMode ? 'Edit Listing' : listing.title}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">ID: {listing.id} · by {listing.seller.name}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {!editMode ? (
+              <Button size="sm" onClick={() => onSetEditMode(true)} className="gap-1.5 rounded-xl bg-brand hover:bg-brand/90 text-white">
+                <Pencil className="w-3.5 h-3.5" /> Edit
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" variant="ghost" onClick={() => onSetEditMode(false)} className="text-slate-400 hover:text-slate-200">
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={onSave} className="gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white">
+                  <Save className="w-3.5 h-3.5" /> Save
+                </Button>
+              </>
+            )}
+            <Button size="icon" variant="ghost" onClick={onClose} className="text-slate-400 hover:text-slate-200 shrink-0">
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-5 max-h-[calc(90vh-180px)] overflow-y-auto custom-scrollbar">
+          {/* Status badges */}
+          <div className="flex gap-2 flex-wrap">
+            {listing.isSold && <Badge className="bg-slate-700 text-slate-300 border-0 text-xs rounded-full">Sold</Badge>}
+            {listing.isFeatured && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-xs rounded-full">Featured</Badge>}
+            {listing.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-xs rounded-full">Verified</Badge>}
+            {listing.isUrgent && <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-xs rounded-full">Urgent</Badge>}
+            {listing.isDigital && <Badge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 text-xs rounded-full">Digital</Badge>}
+          </div>
+
+          {/* Image Gallery */}
+          {parsedImages.length > 0 && (
+            <div>
+              <Label className="text-slate-400 text-xs mb-2 block">Images ({parsedImages.length})</Label>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {parsedImages.map((img, i) => (
+                  <a key={i} href={img} target="_blank" rel="noopener noreferrer" className="block">
+                    <div className="aspect-square rounded-lg overflow-hidden bg-slate-800 border border-slate-700 hover:border-slate-500 transition-colors">
+                      <img src={img} alt={`Image ${i + 1}`} className="w-full h-full object-cover" />
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Digital file link */}
+          {listing.isDigital && listing.fileUrl && (
+            <div>
+              <Label className="text-slate-400 text-xs mb-1 block">Digital File</Label>
+              <a href={listing.fileUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 text-sm underline break-all">
+                {listing.fileUrl}
+              </a>
+            </div>
+          )}
+
+          <Separator className="bg-slate-800" />
+
+          {editMode ? (
+            /* Edit Mode Fields */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <Label className="text-slate-400 text-xs mb-1 block">Title</Label>
+                <Input
+                  value={editForm.title}
+                  onChange={e => onSetEditForm({ ...editForm, title: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-slate-200"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="text-slate-400 text-xs mb-1 block">Description</Label>
+                <Textarea
+                  value={editForm.description}
+                  onChange={e => onSetEditForm({ ...editForm, description: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-slate-200 min-h-24"
+                />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">Original Price (₹)</Label>
+                <Input
+                  type="number"
+                  value={editForm.originalPrice}
+                  onChange={e => onSetEditForm({ ...editForm, originalPrice: Number(e.target.value) })}
+                  className="bg-slate-800 border-slate-700 text-slate-200"
+                />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">Selling Price (₹)</Label>
+                <Input
+                  type="number"
+                  value={editForm.sellingPrice}
+                  onChange={e => onSetEditForm({ ...editForm, sellingPrice: Number(e.target.value) })}
+                  className="bg-slate-800 border-slate-700 text-slate-200"
+                />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">Category</Label>
+                <Select value={editForm.category} onValueChange={v => onSetEditForm({ ...editForm, category: v })}>
+                  <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700">
+                    {categoryOptions.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">City</Label>
+                <Input
+                  value={editForm.city}
+                  onChange={e => onSetEditForm({ ...editForm, city: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-slate-200"
+                />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">Condition</Label>
+                <Select value={editForm.condition} onValueChange={v => onSetEditForm({ ...editForm, condition: v })}>
+                  <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700">
+                    {conditionOptions.map(c => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-slate-300 text-sm">Featured</Label>
+                  <Switch checked={editForm.isFeatured} onCheckedChange={v => onSetEditForm({ ...editForm, isFeatured: v })} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-slate-300 text-sm">Verified</Label>
+                  <Switch checked={editForm.isVerified} onCheckedChange={v => onSetEditForm({ ...editForm, isVerified: v })} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-slate-300 text-sm">Sold</Label>
+                  <Switch checked={editForm.isSold} onCheckedChange={v => onSetEditForm({ ...editForm, isSold: v })} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-slate-300 text-sm">Urgent</Label>
+                  <Switch checked={editForm.isUrgent} onCheckedChange={v => onSetEditForm({ ...editForm, isUrgent: v })} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-slate-300 text-sm">Digital</Label>
+                  <Switch checked={editForm.isDigital} onCheckedChange={v => onSetEditForm({ ...editForm, isDigital: v })} />
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Read Mode Fields */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <div className="sm:col-span-2">
+                <p className="text-slate-500 text-xs mb-1">Description</p>
+                <p className="text-slate-200 whitespace-pre-wrap">{listing.description || 'No description'}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Original Price</p>
+                <p className="text-slate-200 font-mono">{formatINR(listing.originalPrice)}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Selling Price</p>
+                <p className="text-slate-200 font-mono font-bold">{formatINR(listing.sellingPrice)}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Category</p>
+                <p className="text-slate-200">{CATEGORIES.find(c => c.id === listing.category)?.name || listing.category}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">City</p>
+                <p className="text-slate-200">{listing.city}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Condition</p>
+                <p className="text-slate-200">{listing.condition}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Views / Saves</p>
+                <p className="text-slate-200">{listing.views} / {listing.saves}</p>
+              </div>
+              {listing.subcategory && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">Subcategory</p>
+                  <p className="text-slate-200">{listing.subcategory}</p>
+                </div>
+              )}
+              {listing.course && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">Course</p>
+                  <p className="text-slate-200">{listing.course}</p>
+                </div>
+              )}
+              {listing.semester && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">Semester</p>
+                  <p className="text-slate-200">{listing.semester}</p>
+                </div>
+              )}
+              {listing.whatsappNumber && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-1">WhatsApp</p>
+                  <p className="text-slate-200">{listing.whatsappNumber}</p>
+                </div>
+              )}
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Created</p>
+                <p className="text-slate-300">{new Date(listing.createdAt).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Updated</p>
+                <p className="text-slate-300">{new Date(listing.updatedAt).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Seller</p>
+                <p className="text-slate-200">{listing.seller.name} <span className="text-slate-500">({listing.seller.email})</span></p>
+              </div>
+            </div>
+          )}
+
+          <Separator className="bg-slate-800" />
+
+          {/* Action buttons */}
+          <div>
+            <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Quick Actions</p>
+            <div className="flex flex-wrap gap-2">
+              {listing.isSold ? (
+                <Button size="sm" variant="outline" onClick={() => { onAction('mark_unsold', listing.id); onRefresh() }} className="border-slate-700 text-slate-300 hover:bg-slate-800 gap-1.5 rounded-xl text-xs">
+                  <PackageX className="w-3.5 h-3.5" /> Mark Unsold
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => { onAction('mark_sold', listing.id); onRefresh() }} className="border-slate-700 text-slate-300 hover:bg-slate-800 gap-1.5 rounded-xl text-xs">
+                  <PackageCheck className="w-3.5 h-3.5" /> Mark Sold
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={() => { onAction('toggle_urgent', listing.id); onRefresh() }} className="border-slate-700 text-slate-300 hover:bg-slate-800 gap-1.5 rounded-xl text-xs">
+                <Zap className="w-3.5 h-3.5" /> {listing.isUrgent ? 'Remove Urgent' : 'Mark Urgent'}
+              </Button>
+              {listing.isVerified ? (
+                <Button size="sm" variant="outline" onClick={() => { onAction('unverify_listing', listing.id); onRefresh() }} className="border-slate-700 text-slate-300 hover:bg-slate-800 gap-1.5 rounded-xl text-xs">
+                  <EyeOff className="w-3.5 h-3.5" /> Unverify
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => { onAction('verify_listing', listing.id); onRefresh() }} className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 gap-1.5 rounded-xl text-xs">
+                  <BadgeCheck className="w-3.5 h-3.5" /> Verify
+                </Button>
+              )}
+              {listing.isFeatured ? (
+                <Button size="sm" variant="outline" onClick={() => { onAction('unfeature_listing', listing.id); onRefresh() }} className="border-slate-700 text-slate-300 hover:bg-slate-800 gap-1.5 rounded-xl text-xs">
+                  <Star className="w-3.5 h-3.5" /> Unfeature
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => { onAction('feature_listing', listing.id); onRefresh() }} className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10 gap-1.5 rounded-xl text-xs">
+                  <Star className="w-3.5 h-3.5" /> Feature
+                </Button>
+              )}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="outline" className="border-red-500/30 text-red-400 hover:bg-red-500/10 gap-1.5 rounded-xl text-xs">
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="bg-slate-900 border-slate-700">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-slate-100">Delete Listing</AlertDialogTitle>
+                    <AlertDialogDescription className="text-slate-400">
+                      Are you sure you want to permanently delete &quot;{listing.title}&quot;? This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => { onAction('delete_listing', listing.id); onClose() }} className="bg-red-600 hover:bg-red-700 text-white">
+                      Delete Permanently
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ─── User Detail Modal ────────────────────────────────────────────
+
+function UserDetailModal({
+  user, editMode, editForm, userListings, userListingsLoading, onSetEditMode, onSetEditForm, onSave, onAction, onOpenListing, onClose, onRefresh, adminId
+}: {
+  user: UserItem
+  editMode: boolean
+  editForm: UserEditForm | null
+  userListings: ListingItem[]
+  userListingsLoading: boolean
+  onSetEditMode: (v: boolean) => void
+  onSetEditForm: (v: UserEditForm) => void
+  onSave: () => void
+  onAction: (a: string, t: string) => void
+  onOpenListing: (id: string) => void
+  onClose: () => void
+  onRefresh: () => void
+  adminId: string
+}) {
+  if (!editForm) return null
+
+  const isSelf = user.id === adminId
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 20 }}
+        className="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl my-8"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-800">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand to-accent flex items-center justify-center text-white font-bold shrink-0">
+              {user.name.charAt(0)}
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-slate-100 truncate">{editMode ? 'Edit User' : user.name}</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-slate-500">{user.email}</p>
+                {user.isAdmin && <RoleBadge role={user.adminRole || 'support_admin'} />}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {!editMode ? (
+              <Button size="sm" onClick={() => onSetEditMode(true)} className="gap-1.5 rounded-xl bg-brand hover:bg-brand/90 text-white">
+                <Pencil className="w-3.5 h-3.5" /> Edit
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" variant="ghost" onClick={() => onSetEditMode(false)} className="text-slate-400 hover:text-slate-200">
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={onSave} className="gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white">
+                  <Save className="w-3.5 h-3.5" /> Save
+                </Button>
+              </>
+            )}
+            <Button size="icon" variant="ghost" onClick={onClose} className="text-slate-400 hover:text-slate-200 shrink-0">
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-5 max-h-[calc(90vh-180px)] overflow-y-auto custom-scrollbar">
+          {/* Status badges */}
+          <div className="flex gap-2 flex-wrap">
+            {user.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-xs rounded-full">Verified</Badge>}
+            {user.isBanned && <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-xs rounded-full">Banned</Badge>}
+            {user.isAdmin && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-xs rounded-full">Admin</Badge>}
+            {!user.isBanned && !user.isAdmin && <Badge className="bg-slate-700/50 text-slate-400 border-slate-700 text-xs rounded-full">Active</Badge>}
+          </div>
+
+          {editMode ? (
+            /* Edit Mode Fields */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">Name</Label>
+                <Input value={editForm.name} onChange={e => onSetEditForm({ ...editForm, name: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">Email</Label>
+                <Input value={editForm.email} onChange={e => onSetEditForm({ ...editForm, email: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">College</Label>
+                <Input value={editForm.college} onChange={e => onSetEditForm({ ...editForm, college: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">City</Label>
+                <Input value={editForm.city} onChange={e => onSetEditForm({ ...editForm, city: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
+              </div>
+              <div>
+                <Label className="text-slate-400 text-xs mb-1 block">Phone</Label>
+                <Input value={editForm.phone} onChange={e => onSetEditForm({ ...editForm, phone: e.target.value })} className="bg-slate-800 border-slate-700 text-slate-200" />
+              </div>
+              <div className="flex items-center justify-between pt-5">
+                <Label className="text-slate-300 text-sm">Verified</Label>
+                <Switch checked={editForm.isVerified} onCheckedChange={v => onSetEditForm({ ...editForm, isVerified: v })} />
+              </div>
+            </div>
+          ) : (
+            /* Read Mode */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-slate-500 text-xs mb-1">College</p>
+                <p className="text-slate-200">{user.college || '—'}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">City</p>
+                <p className="text-slate-200">{user.city || '—'}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Phone</p>
+                <p className="text-slate-200">{user.phone || '—'}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Rating</p>
+                <p className="text-slate-200">{user.rating.toFixed(1)} / 5.0</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Total Sales</p>
+                <p className="text-slate-200">{user.totalSales}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Joined</p>
+                <p className="text-slate-300">{new Date(user.createdAt).toLocaleDateString()}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs mb-1">Listings Count</p>
+                <p className="text-slate-200">{user._count.listings}</p>
+              </div>
+            </div>
+          )}
+
+          <Separator className="bg-slate-800" />
+
+          {/* User's Listings */}
+          <div>
+            <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">User&apos;s Listings ({userListings.length})</p>
+            {userListingsLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-10 bg-slate-800 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : userListings.length === 0 ? (
+              <p className="text-slate-500 text-sm">No listings</p>
+            ) : (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+                {userListings.map(l => (
+                  <div
+                    key={l.id}
+                    className="flex items-center justify-between p-2.5 bg-slate-800/50 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
+                    onClick={() => { onClose(); onOpenListing(l.id) }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-slate-200 truncate">{l.title}</p>
+                      <div className="flex gap-1 mt-0.5">
+                        {l.isSold && <Badge className="bg-slate-700 text-slate-300 border-0 text-[9px] rounded-full px-1.5">Sold</Badge>}
+                        {l.isFeatured && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px] rounded-full px-1.5">Featured</Badge>}
+                        {l.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[9px] rounded-full px-1.5">Verified</Badge>}
+                      </div>
+                    </div>
+                    <span className="text-sm text-slate-300 font-mono shrink-0 ml-3">{formatINR(l.sellingPrice)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Separator className="bg-slate-800" />
+
+          {/* Action buttons */}
+          <div>
+            <p className="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wider">Actions</p>
+            <div className="flex flex-wrap gap-2">
+              {!user.isVerified && (
+                <Button size="sm" variant="outline" onClick={() => { onAction('verify_seller', user.id); onRefresh() }} className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 gap-1.5 rounded-xl text-xs">
+                  <BadgeCheck className="w-3.5 h-3.5" /> Verify
+                </Button>
+              )}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="outline" className={`gap-1.5 rounded-xl text-xs ${user.isBanned ? 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10' : 'border-red-500/30 text-red-400 hover:bg-red-500/10'}`}>
+                    <Ban className="w-3.5 h-3.5" /> {user.isBanned ? 'Unban' : 'Ban'}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="bg-slate-900 border-slate-700">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-slate-100">{user.isBanned ? 'Unban User' : 'Ban User'}</AlertDialogTitle>
+                    <AlertDialogDescription className="text-slate-400">
+                      {user.isBanned
+                        ? `Are you sure you want to unban ${user.name}?`
+                        : `Are you sure you want to ban ${user.name}? They will lose access to their account.`}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => { onAction(user.isBanned ? 'unban_user' : 'ban_user', user.id); onRefresh() }}
+                      className={user.isBanned ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}
+                    >
+                      {user.isBanned ? 'Unban' : 'Ban'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="outline" className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10 gap-1.5 rounded-xl text-xs">
+                    <ListX className="w-3.5 h-3.5" /> Delete All Listings
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="bg-slate-900 border-slate-700">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-slate-100">Delete All User Listings</AlertDialogTitle>
+                    <AlertDialogDescription className="text-slate-400">
+                      Are you sure you want to delete ALL listings by {user.name}? This will permanently remove {user._count.listings} listing(s) and cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => { onAction('delete_user_listings', user.id); onRefresh() }} className="bg-orange-600 hover:bg-orange-700 text-white">
+                      Delete All Listings
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              {!isSelf && !user.isAdmin && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm" variant="outline" className="border-red-600/50 text-red-500 hover:bg-red-500/10 gap-1.5 rounded-xl text-xs">
+                      <UserX className="w-3.5 h-3.5" /> Delete User Account
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent className="bg-slate-900 border-slate-700">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle className="text-slate-100 text-red-400">⚠️ Delete User Account Permanently</AlertDialogTitle>
+                      <AlertDialogDescription className="text-slate-400">
+                        This will PERMANENTLY delete the account for <strong className="text-slate-200">{user.name}</strong> ({user.email}).
+                        All their listings, wishlists, reports, payments, and session data will be destroyed.
+                        This action is IRREVERSIBLE.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => { onAction('delete_user', user.id); onClose() }} className="bg-red-600 hover:bg-red-700 text-white">
+                        Delete Permanently
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
 // ─── Overview Tab ──────────────────────────────────────────────────
 
-function OverviewTab({ stats, loading, onAction }: { stats: Stats | null; loading: boolean; onAction: (a: string, t: string) => void }) {
+function OverviewTab({ stats, loading, onAction, onOpenListing }: { stats: Stats | null; loading: boolean; onAction: (a: string, t: string) => void; onOpenListing: (id: string) => void }) {
   if (loading || !stats) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -587,7 +1471,11 @@ function OverviewTab({ stats, loading, onAction }: { stats: Stats | null; loadin
             <tbody>
               {stats.recentListings.map(listing => (
                 <tr key={listing.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                  <td className="py-2.5 px-3 text-slate-200 max-w-[200px] truncate">{listing.title}</td>
+                  <td className="py-2.5 px-3">
+                    <button onClick={() => onOpenListing(listing.id)} className="text-slate-200 max-w-[200px] truncate hover:text-brand transition-colors text-left">
+                      {listing.title}
+                    </button>
+                  </td>
                   <td className="py-2.5 px-3 text-slate-400">{listing.seller.name}</td>
                   <td className="py-2.5 px-3 text-slate-300 font-mono">{formatINR(listing.sellingPrice)}</td>
                   <td className="py-2.5 px-3">
@@ -639,7 +1527,7 @@ function OverviewTab({ stats, loading, onAction }: { stats: Stats | null; loadin
 
 // ─── Users Tab ────────────────────────────────────────────────────
 
-function UsersTab({ users, loading, onAction }: { users: UserItem[]; loading: boolean; onAction: (a: string, t: string, d?: string) => void }) {
+function UsersTab({ users, loading, onAction, onOpenUser, adminId }: { users: UserItem[]; loading: boolean; onAction: (a: string, t: string, d?: string) => void; onOpenUser: (u: UserItem) => void; adminId: string }) {
   if (loading) {
     return <LoadingSkeleton />
   }
@@ -688,15 +1576,19 @@ function UsersTab({ users, loading, onAction }: { users: UserItem[]; loading: bo
                 </td>
                 <td className="py-2.5 px-3">
                   <div className="flex justify-end gap-1">
+                    {/* View button */}
+                    <Button size="sm" variant="ghost" onClick={() => onOpenUser(user)} className="h-7 text-xs text-cyan-400 hover:bg-cyan-500/10 gap-1">
+                      <Eye className="w-3 h-3" /> View
+                    </Button>
                     {!user.isVerified && (
                       <Button size="sm" variant="ghost" onClick={() => onAction('verify_seller', user.id)} className="h-7 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 gap-1">
-                        <BadgeCheck className="w-3 h-3" /> Verify
+                        <BadgeCheck className="w-3 h-3" />
                       </Button>
                     )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button size="sm" variant="ghost" className={`h-7 text-xs gap-1 ${user.isBanned ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-red-400 hover:bg-red-500/10'}`}>
-                          <Ban className="w-3 h-3" /> {user.isBanned ? 'Unban' : 'Ban'}
+                          <Ban className="w-3 h-3" />
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent className="bg-slate-900 border-slate-700">
@@ -719,6 +1611,54 @@ function UsersTab({ users, loading, onAction }: { users: UserItem[]; loading: bo
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    {/* Delete user listings */}
+                    {user._count.listings > 0 && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs text-orange-400 hover:bg-orange-500/10">
+                            <ListX className="w-3 h-3" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="bg-slate-900 border-slate-700">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle className="text-slate-100">Delete All Listings</AlertDialogTitle>
+                            <AlertDialogDescription className="text-slate-400">
+                              Delete all {user._count.listings} listing(s) by {user.name}? This cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => onAction('delete_user_listings', user.id)} className="bg-orange-600 hover:bg-orange-700 text-white">
+                              Delete All
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                    {/* Delete user - not for admins or self */}
+                    {!user.isAdmin && user.id !== adminId && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs text-red-500 hover:bg-red-500/10">
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="bg-slate-900 border-slate-700">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle className="text-slate-100 text-red-400">⚠️ Delete User Account</AlertDialogTitle>
+                            <AlertDialogDescription className="text-slate-400">
+                              Permanently delete <strong className="text-slate-200">{user.name}</strong>&apos;s account and all their data? This is IRREVERSIBLE.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="bg-slate-800 text-slate-200 border-slate-700">Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => onAction('delete_user', user.id)} className="bg-red-600 hover:bg-red-700 text-white">
+                              Delete Permanently
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -732,7 +1672,7 @@ function UsersTab({ users, loading, onAction }: { users: UserItem[]; loading: bo
 
 // ─── Listings Tab ─────────────────────────────────────────────────
 
-function ListingsTab({ listings, loading, onAction }: { listings: ListingItem[]; loading: boolean; onAction: (a: string, t: string) => void }) {
+function ListingsTab({ listings, loading, onAction, onOpenListing }: { listings: ListingItem[]; loading: boolean; onAction: (a: string, t: string) => void; onOpenListing: (id: string) => void }) {
   if (loading) return <LoadingSkeleton />
 
   return (
@@ -756,7 +1696,9 @@ function ListingsTab({ listings, loading, onAction }: { listings: ListingItem[];
               <tr key={listing.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                 <td className="py-2.5 px-3">
                   <div className="min-w-0">
-                    <p className="text-slate-200 font-medium truncate max-w-[200px]">{listing.title}</p>
+                    <button onClick={() => onOpenListing(listing.id)} className="text-slate-200 font-medium truncate max-w-[200px] hover:text-brand transition-colors text-left block">
+                      {listing.title}
+                    </button>
                     <p className="text-xs text-slate-500">{CATEGORIES.find(c => c.id === listing.category)?.name || listing.category} · {listing.city}</p>
                   </div>
                 </td>
@@ -770,6 +1712,8 @@ function ListingsTab({ listings, loading, onAction }: { listings: ListingItem[];
                     {listing.isSold && <Badge className="bg-slate-700 text-slate-300 border-0 text-[10px] rounded-full">Sold</Badge>}
                     {listing.isFeatured && <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px] rounded-full">Featured</Badge>}
                     {listing.isVerified && <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] rounded-full">Verified</Badge>}
+                    {listing.isUrgent && <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-[10px] rounded-full">Urgent</Badge>}
+                    {listing.isDigital && <Badge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 text-[10px] rounded-full">Digital</Badge>}
                     {!listing.isSold && !listing.isFeatured && !listing.isVerified && (
                       <Badge className="bg-slate-700/50 text-slate-400 border-slate-700 text-[10px] rounded-full">Active</Badge>
                     )}
@@ -777,22 +1721,54 @@ function ListingsTab({ listings, loading, onAction }: { listings: ListingItem[];
                 </td>
                 <td className="py-2.5 px-3">
                   <div className="flex justify-end gap-1">
-                    {!listing.isVerified && (
-                      <Button size="sm" variant="ghost" onClick={() => onAction('verify_listing', listing.id)} className="h-7 text-xs text-emerald-400 hover:bg-emerald-500/10">
+                    {/* Edit button */}
+                    <Button size="sm" variant="ghost" onClick={() => onOpenListing(listing.id)} className="h-7 text-xs text-cyan-400 hover:bg-cyan-500/10" title="Edit listing">
+                      <Pencil className="w-3 h-3" />
+                    </Button>
+                    {/* Sold/Unsold toggle */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onAction(listing.isSold ? 'mark_unsold' : 'mark_sold', listing.id)}
+                      className={`h-7 text-xs ${listing.isSold ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-slate-400 hover:bg-slate-500/10'}`}
+                      title={listing.isSold ? 'Mark unsold' : 'Mark sold'}
+                    >
+                      {listing.isSold ? <PackageX className="w-3 h-3" /> : <PackageCheck className="w-3 h-3" />}
+                    </Button>
+                    {/* Urgent toggle */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onAction('toggle_urgent', listing.id)}
+                      className={`h-7 text-xs ${listing.isUrgent ? 'text-red-400 hover:bg-red-500/10' : 'text-slate-400 hover:bg-slate-500/10'}`}
+                      title={listing.isUrgent ? 'Remove urgent' : 'Mark urgent'}
+                    >
+                      <Zap className="w-3 h-3" />
+                    </Button>
+                    {/* Verify/Unverify */}
+                    {listing.isVerified ? (
+                      <Button size="sm" variant="ghost" onClick={() => onAction('unverify_listing', listing.id)} className="h-7 text-xs text-slate-400 hover:bg-slate-500/10" title="Unverify">
+                        <EyeOff className="w-3 h-3" />
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => onAction('verify_listing', listing.id)} className="h-7 text-xs text-emerald-400 hover:bg-emerald-500/10" title="Verify">
                         <BadgeCheck className="w-3 h-3" />
                       </Button>
                     )}
+                    {/* Feature/Unfeature */}
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={() => onAction(listing.isFeatured ? 'unfeature_listing' : 'feature_listing', listing.id)}
                       className={`h-7 text-xs ${listing.isFeatured ? 'text-slate-400 hover:bg-slate-500/10' : 'text-amber-400 hover:bg-amber-500/10'}`}
+                      title={listing.isFeatured ? 'Unfeature' : 'Feature'}
                     >
                       <Star className="w-3 h-3" />
                     </Button>
+                    {/* Delete */}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button size="sm" variant="ghost" className="h-7 text-xs text-red-400 hover:bg-red-500/10">
+                        <Button size="sm" variant="ghost" className="h-7 text-xs text-red-400 hover:bg-red-500/10" title="Delete">
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       </AlertDialogTrigger>
@@ -907,9 +1883,18 @@ function AuditTab({ logs, loading }: { logs: AuditLogItem[]; loading: boolean })
     unban_user: CheckCircle2,
     verify_seller: BadgeCheck,
     verify_listing: BadgeCheck,
+    unverify_listing: EyeOff,
     feature_listing: Star,
     unfeature_listing: Star,
     resolve_report: CheckCircle2,
+    mark_sold: PackageCheck,
+    mark_unsold: PackageX,
+    mark_urgent: Zap,
+    unmark_urgent: Zap,
+    edit_listing: Pencil,
+    edit_user: UserCog,
+    delete_user: UserX,
+    delete_user_listings: ListX,
   }
   const actionColors: Record<string, string> = {
     delete_listing: 'text-red-400 bg-red-500/10',
@@ -917,9 +1902,18 @@ function AuditTab({ logs, loading }: { logs: AuditLogItem[]; loading: boolean })
     unban_user: 'text-emerald-400 bg-emerald-500/10',
     verify_seller: 'text-emerald-400 bg-emerald-500/10',
     verify_listing: 'text-emerald-400 bg-emerald-500/10',
+    unverify_listing: 'text-slate-400 bg-slate-500/10',
     feature_listing: 'text-amber-400 bg-amber-500/10',
     unfeature_listing: 'text-slate-400 bg-slate-500/10',
     resolve_report: 'text-emerald-400 bg-emerald-500/10',
+    mark_sold: 'text-cyan-400 bg-cyan-500/10',
+    mark_unsold: 'text-slate-400 bg-slate-500/10',
+    mark_urgent: 'text-red-400 bg-red-500/10',
+    unmark_urgent: 'text-slate-400 bg-slate-500/10',
+    edit_listing: 'text-cyan-400 bg-cyan-500/10',
+    edit_user: 'text-cyan-400 bg-cyan-500/10',
+    delete_user: 'text-red-400 bg-red-500/10',
+    delete_user_listings: 'text-orange-400 bg-orange-500/10',
   }
 
   return (

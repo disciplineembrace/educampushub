@@ -54,6 +54,28 @@ export async function GET(request: Request) {
     return NextResponse.json({ listings })
   }
 
+  if (type === 'listing-detail') {
+    const listingId = searchParams.get('id')
+    if (!listingId) return NextResponse.json({ error: 'Missing listing id' }, { status: 400 })
+    const listing = await db.listing.findUnique({
+      where: { id: listingId },
+      include: { seller: { select: { id: true, name: true, email: true, college: true, phone: true, isVerified: true, isBanned: true } } },
+    })
+    if (!listing) return NextResponse.json({ error: 'Listing not found' }, { status: 404 })
+    return NextResponse.json({ listing })
+  }
+
+  if (type === 'user-listings') {
+    const userId = searchParams.get('id')
+    if (!userId) return NextResponse.json({ error: 'Missing user id' }, { status: 400 })
+    const userListings = await db.listing.findMany({
+      where: { sellerId: userId },
+      include: { seller: { select: { id: true, name: true, email: true, college: true } } },
+      orderBy: { createdAt: 'desc' },
+    })
+    return NextResponse.json({ listings: userListings })
+  }
+
   if (type === 'audit-logs') {
     if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const logs = await db.auditLog.findMany({ include: { actor: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' }, take: 100 })
@@ -79,7 +101,7 @@ export async function POST(request: Request) {
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const { action, targetId, details } = body
+  const { action, targetId, details, updates } = body
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
 
   try {
@@ -126,6 +148,103 @@ export async function POST(request: Request) {
         if (!hasPermission(admin.role as AdminRole, 'verify_seller')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         await db.listing.update({ where: { id: targetId }, data: { isVerified: true } })
         await db.auditLog.create({ data: { actorId: admin.userId, action: 'verify_listing', targetType: 'listing', targetId, ipAddress: ip } })
+        return NextResponse.json({ success: true })
+      }
+      case 'unverify_listing': {
+        if (!hasPermission(admin.role as AdminRole, 'verify_seller')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        await db.listing.update({ where: { id: targetId }, data: { isVerified: false } })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'unverify_listing', targetType: 'listing', targetId, ipAddress: ip } })
+        return NextResponse.json({ success: true })
+      }
+      case 'mark_sold': {
+        if (!hasPermission(admin.role as AdminRole, 'feature_listing')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        await db.listing.update({ where: { id: targetId }, data: { isSold: true } })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'mark_sold', targetType: 'listing', targetId, ipAddress: ip } })
+        return NextResponse.json({ success: true })
+      }
+      case 'mark_unsold': {
+        if (!hasPermission(admin.role as AdminRole, 'feature_listing')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        await db.listing.update({ where: { id: targetId }, data: { isSold: false } })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'mark_unsold', targetType: 'listing', targetId, ipAddress: ip } })
+        return NextResponse.json({ success: true })
+      }
+      case 'toggle_urgent': {
+        if (!hasPermission(admin.role as AdminRole, 'feature_listing')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const listing = await db.listing.findUnique({ where: { id: targetId }, select: { isUrgent: true } })
+        if (!listing) return NextResponse.json({ error: 'Listing not found' }, { status: 404 })
+        const newValue = !listing.isUrgent
+        await db.listing.update({ where: { id: targetId }, data: { isUrgent: newValue } })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: newValue ? 'mark_urgent' : 'unmark_urgent', targetType: 'listing', targetId, ipAddress: ip } })
+        return NextResponse.json({ success: true, isUrgent: newValue })
+      }
+      case 'edit_listing': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        if (!updates) return NextResponse.json({ error: 'Missing updates' }, { status: 400 })
+        const allowedFields = ['title', 'description', 'originalPrice', 'sellingPrice', 'category', 'subcategory', 'city', 'condition', 'isFeatured', 'isVerified', 'isSold', 'isUrgent', 'isDigital']
+        const cleanUpdates: Record<string, unknown> = {}
+        for (const key of allowedFields) {
+          if (updates[key] !== undefined) {
+            cleanUpdates[key] = updates[key]
+          }
+        }
+        if (Object.keys(cleanUpdates).length === 0) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+        await db.listing.update({ where: { id: targetId }, data: cleanUpdates })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'edit_listing', targetType: 'listing', targetId, ipAddress: ip, details: JSON.stringify(cleanUpdates) } })
+        return NextResponse.json({ success: true })
+      }
+      case 'edit_user': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        if (!updates) return NextResponse.json({ error: 'Missing updates' }, { status: 400 })
+        const allowedUserFields = ['name', 'email', 'college', 'city', 'isVerified', 'phone']
+        const cleanUserUpdates: Record<string, unknown> = {}
+        for (const key of allowedUserFields) {
+          if (updates[key] !== undefined) {
+            cleanUserUpdates[key] = updates[key]
+          }
+        }
+        if (Object.keys(cleanUserUpdates).length === 0) return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+        await db.user.update({ where: { id: targetId }, data: cleanUserUpdates })
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'edit_user', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify(cleanUserUpdates) } })
+        return NextResponse.json({ success: true })
+      }
+      case 'delete_user': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const targetUser = await db.user.findUnique({ where: { id: targetId } })
+        if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        if (targetUser.isAdmin) return NextResponse.json({ error: 'Cannot delete admin accounts' }, { status: 403 })
+        // Create audit log BEFORE deleting the user (since audit log references the user as actor)
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'delete_user', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify({ name: targetUser.name, email: targetUser.email }) } })
+        // Delete user's listings and their related data
+        const userListings = await db.listing.findMany({ where: { sellerId: targetId }, select: { id: true } })
+        const listingIds = userListings.map(l => l.id)
+        if (listingIds.length > 0) {
+          await db.wishlist.deleteMany({ where: { listingId: { in: listingIds } } })
+          await db.report.deleteMany({ where: { listingId: { in: listingIds } } })
+          await db.listing.deleteMany({ where: { id: { in: listingIds } } })
+        }
+        // Delete other user data
+        await db.wishlist.deleteMany({ where: { userId: targetId } })
+        await db.report.deleteMany({ where: { reporterId: targetId } })
+        await db.adminSession.deleteMany({ where: { userId: targetId } })
+        await db.payment.deleteMany({ where: { userId: targetId } })
+        // Delete audit logs that reference this user as target (not as actor)
+        await db.auditLog.deleteMany({ where: { targetId, targetType: 'user' } })
+        // Finally delete the user
+        await db.user.delete({ where: { id: targetId } })
+        return NextResponse.json({ success: true })
+      }
+      case 'delete_user_listings': {
+        if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const userForListings = await db.user.findUnique({ where: { id: targetId } })
+        if (!userForListings) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        const userListingIds = await db.listing.findMany({ where: { sellerId: targetId }, select: { id: true } })
+        const ids = userListingIds.map(l => l.id)
+        if (ids.length > 0) {
+          await db.wishlist.deleteMany({ where: { listingId: { in: ids } } })
+          await db.report.deleteMany({ where: { listingId: { in: ids } } })
+          await db.listing.deleteMany({ where: { id: { in: ids } } })
+        }
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'delete_user_listings', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify({ count: ids.length }) } })
         return NextResponse.json({ success: true })
       }
       case 'resolve_report': {
