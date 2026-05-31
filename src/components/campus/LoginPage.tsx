@@ -185,7 +185,11 @@ export default function LoginPage() {
         if (data.error?.includes('already registered') || data.error === 'Email already registered') {
           setError(data.error.includes('phone') ? 'This phone number is already registered. Please login instead.' : t('login.error.emailExists'))
         } else if (data.smsError) {
-          setError('Failed to send OTP. Please check your phone number and try again.')
+          // SMS provider error — show the specific error from backend
+          const smsMsg = data.needsAccountSetup
+            ? `OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`
+            : (data.error || 'Failed to send OTP. Please check your phone number and try again.')
+          setError(smsMsg)
         } else {
           setError(data.error || 'Failed to send OTP. Please try again.')
         }
@@ -326,7 +330,11 @@ export default function LoginPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        setForgotError(data.error || t('forgotPassword.error.sendFailed'))
+        if (data.smsError && data.needsAccountSetup) {
+          setForgotError(`OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`)
+        } else {
+          setForgotError(data.error || t('forgotPassword.error.sendFailed'))
+        }
         return
       }
 
@@ -445,7 +453,11 @@ export default function LoginPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        setForgotError(data.error || t('forgotPassword.error.sendFailed'))
+        if (data.smsError && data.needsAccountSetup) {
+          setForgotError(`OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`)
+        } else {
+          setForgotError(data.error || t('forgotPassword.error.sendFailed'))
+        }
         return
       }
 

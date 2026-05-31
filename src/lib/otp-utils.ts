@@ -6,6 +6,13 @@
  *   2. MSG91  (fallback — DLT-approved, best for India production)
  *   3. Console log (development only — returns success=false in production)
  *
+ * Fast2SMS Route Priority:
+ *   1. Quick route (route: 'q') — works without DLT, best for new accounts
+ *   2. OTP route (route: 'otp') — built-in OTP template, needs website verification
+ *   3. Transactional route (route: 't') — needs ₹100+ balance
+ *   4. DLT route (route: 'dlt') — needs DLT template ID
+ *   5. V1 Bulk API (legacy) — last resort fallback
+ *
  * Uses Neon serverless driver (HTTP) for database queries
  * to ensure reliable connectivity in serverless environments.
  */
@@ -172,6 +179,8 @@ export interface SMSResult {
   deliveryId?: string   // tracking ID from provider
   error?: string        // error details if failed
   isConsoleFallback?: boolean  // true if no real SMS was sent
+  needsAccountSetup?: boolean  // true if SMS provider account needs setup (balance/verification)
+  setupInstructions?: string   // human-readable instructions for account setup
 }
 
 /**
@@ -207,6 +216,54 @@ export function getConfiguredProviders(): string[] {
 
 // ─── Provider 1: Fast2SMS (Primary — configured with API key) ───
 
+/**
+ * Classify a Fast2SMS error into a user-friendly message and setup instructions.
+ */
+function classifyFast2SMSError(statusCode: number, rawMessage: string): {
+  userMessage: string
+  needsAccountSetup: boolean
+  setupInstructions: string
+} {
+  switch (statusCode) {
+    case 996:
+      return {
+        userMessage: 'SMS OTP route needs website verification on Fast2SMS.',
+        needsAccountSetup: true,
+        setupInstructions: 'Go to fast2sms.com → OTP Message menu → Verify your website. This enables the OTP route for sending verification codes.',
+      }
+    case 999:
+      return {
+        userMessage: 'Fast2SMS requires a minimum ₹100 transaction before using API routes.',
+        needsAccountSetup: true,
+        setupInstructions: 'Add at least ₹100 balance to your Fast2SMS wallet and complete one transaction. After that, all API routes (Quick, Transactional, OTP) will work.',
+      }
+    case 412:
+      return {
+        userMessage: 'Fast2SMS API authentication failed.',
+        needsAccountSetup: true,
+        setupInstructions: 'Check your Fast2SMS API key. Go to fast2sms.com → API Documentation → Copy the correct authorization key.',
+      }
+    case 406:
+      return {
+        userMessage: 'Invalid sender ID configured for Fast2SMS.',
+        needsAccountSetup: true,
+        setupInstructions: 'Use the default sender ID or register a custom one on Fast2SMS.',
+      }
+    case 301:
+      return {
+        userMessage: 'Insufficient balance in Fast2SMS wallet.',
+        needsAccountSetup: true,
+        setupInstructions: 'Add balance to your Fast2SMS wallet at fast2sms.com → Wallet.',
+      }
+    default:
+      return {
+        userMessage: rawMessage || 'Unknown Fast2SMS error',
+        needsAccountSetup: false,
+        setupInstructions: '',
+      }
+  }
+}
+
 async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
   const apiKey = FAST2SMS_API_KEY()
 
@@ -215,125 +272,19 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
   }
 
   const normalizedPhone = normalizePhone(phone)
+  const maskedPhone = `${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)}`
+  const otpMessage = `Your EduCampusHub OTP is ${otp}. Do not share with anyone. Valid for ${OTP_EXPIRY_MINUTES} minutes.`
 
-  // Strategy: Try OTP route first, then DLT route if template is configured
-  // Fast2SMS OTP route uses their built-in template
+  // Collect errors from each route attempt for diagnostic purposes
+  const routeErrors: { route: string; statusCode: number; message: string }[] = []
 
   try {
-    // ─── Attempt 1: OTP Route (built-in template) ───
-    console.log(`[Fast2SMS] Attempting OTP route for ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)}`)
+    // ─── Attempt 1: Quick Route (best for accounts without DLT) ───
+    // Quick route is designed for users without DLT registration.
+    // It works for OTP, transactional, and promotional messages.
+    console.log(`[Fast2SMS] Attempt 1: Quick route for ${maskedPhone}`)
 
-    const otpResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-      method: 'POST',
-      headers: {
-        'authorization': apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        route: 'otp',
-        variables_values: otp,
-        numbers: normalizedPhone,
-        flash: 0,
-      }),
-    })
-
-    const otpData = await otpResponse.json()
-
-    if (otpData.return === true) {
-      console.log(`[Fast2SMS] OTP sent successfully to ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)} | Request ID: ${otpData.request_id || 'N/A'}`)
-      return {
-        success: true,
-        message: 'OTP sent successfully via Fast2SMS',
-        provider: 'Fast2SMS',
-        deliveryId: otpData.request_id || undefined,
-      }
-    }
-
-    // Log OTP route failure
-    console.warn(`[Fast2SMS] OTP route failed: ${JSON.stringify(otpData)}`)
-
-    // Check for specific errors that indicate we should try other routes
-    const otpRouteNeedsVerification = otpData.status_code === 996
-    const otpRouteNeedsTransaction = otpData.status_code === 999
-
-    // ─── Attempt 2: DLT Route (if DLT template configured) ───
-    const dltTemplateId = FAST2SMS_DLT_TEMPLATE_ID()
-    if (dltTemplateId) {
-      console.log(`[Fast2SMS] Trying DLT route with template ${dltTemplateId}`)
-
-      const dltResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-        method: 'POST',
-        headers: {
-          'authorization': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          route: 'dlt',
-          sender_id: FAST2SMS_SENDER_ID(),
-          message: `Your OTP for EduCampusHub is ${otp}. Do not share with anyone. Valid for ${OTP_EXPIRY_MINUTES} minutes.`,
-          template_id: dltTemplateId,
-          numbers: normalizedPhone,
-          flash: 0,
-        }),
-      })
-
-      const dltData = await dltResponse.json()
-
-      if (dltData.return === true) {
-        console.log(`[Fast2SMS] DLT route sent successfully to ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)} | Request ID: ${dltData.request_id || 'N/A'}`)
-        return {
-          success: true,
-          message: 'OTP sent successfully via Fast2SMS (DLT)',
-          provider: 'Fast2SMS',
-          deliveryId: dltData.request_id || undefined,
-        }
-      }
-
-      console.warn(`[Fast2SMS] DLT route also failed: ${JSON.stringify(dltData)}`)
-      return {
-        success: false,
-        message: `Fast2SMS delivery failed. OTP route: ${otpData.message || 'Failed'}. DLT route: ${dltData.message || 'Failed'}`,
-        provider: 'Fast2SMS',
-        error: JSON.stringify({ otpRoute: otpData, dltRoute: dltData }),
-      }
-    }
-
-    // ─── Attempt 3: Transactional Route (if OTP needs website verification) ───
-    if (otpRouteNeedsVerification) {
-      console.log(`[Fast2SMS] OTP route needs website verification, trying transactional route`)
-
-      const tResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-        method: 'POST',
-        headers: {
-          'authorization': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          route: 't',
-          message: `Your EduCampusHub OTP is ${otp}. Do not share. Valid ${OTP_EXPIRY_MINUTES} min. -EduCampusHub`,
-          language: 'english',
-          flash: 0,
-          numbers: normalizedPhone,
-        }),
-      })
-
-      const tData = await tResponse.json()
-
-      if (tData.return === true) {
-        console.log(`[Fast2SMS] Transactional route sent successfully to ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)} | Request ID: ${tData.request_id || 'N/A'}`)
-        return {
-          success: true,
-          message: 'OTP sent successfully via Fast2SMS (Transactional)',
-          provider: 'Fast2SMS',
-          deliveryId: tData.request_id || undefined,
-        }
-      }
-
-      console.warn(`[Fast2SMS] Transactional route failed: ${JSON.stringify(tData)}`)
-
-      // ─── Attempt 4: Quick Transactional Route (fallback) ───
-      console.log(`[Fast2SMS] Trying quick transactional route (q)`)
-
+    try {
       const qResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
         headers: {
@@ -342,7 +293,7 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
         },
         body: JSON.stringify({
           route: 'q',
-          message: `Your EduCampusHub OTP is ${otp}. Do not share. Valid ${OTP_EXPIRY_MINUTES} min.`,
+          message: otpMessage,
           language: 'english',
           flash: 0,
           numbers: normalizedPhone,
@@ -352,81 +303,199 @@ async function sendViaFast2SMS(phone: string, otp: string): Promise<SMSResult> {
       const qData = await qResponse.json()
 
       if (qData.return === true) {
-        console.log(`[Fast2SMS] Quick route sent successfully to ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)} | Request ID: ${qData.request_id || 'N/A'}`)
+        console.log(`[Fast2SMS] Quick route SUCCESS for ${maskedPhone} | Request ID: ${qData.request_id || 'N/A'}`)
         return {
           success: true,
-          message: 'OTP sent successfully via Fast2SMS (Quick)',
+          message: 'OTP sent successfully via Fast2SMS',
           provider: 'Fast2SMS',
           deliveryId: qData.request_id || undefined,
         }
       }
 
-      console.warn(`[Fast2SMS] Quick route also failed: ${JSON.stringify(qData)}`)
+      routeErrors.push({ route: 'quick', statusCode: qData.status_code, message: qData.message })
+      console.warn(`[Fast2SMS] Quick route failed (${qData.status_code}): ${qData.message}`)
+    } catch (e: any) {
+      routeErrors.push({ route: 'quick', statusCode: 0, message: e.message })
+      console.warn(`[Fast2SMS] Quick route error: ${e.message}`)
+    }
 
-      // ─── Attempt 5: V1 Bulk API (legacy, may work without verification) ───
-      console.log(`[Fast2SMS] Trying legacy V1 bulk API`)
+    // ─── Attempt 2: OTP Route (built-in OTP template) ───
+    console.log(`[Fast2SMS] Attempt 2: OTP route for ${maskedPhone}`)
+
+    try {
+      const otpResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: {
+          'authorization': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          route: 'otp',
+          variables_values: otp,
+          numbers: normalizedPhone,
+          flash: 0,
+        }),
+      })
+
+      const otpData = await otpResponse.json()
+
+      if (otpData.return === true) {
+        console.log(`[Fast2SMS] OTP route SUCCESS for ${maskedPhone} | Request ID: ${otpData.request_id || 'N/A'}`)
+        return {
+          success: true,
+          message: 'OTP sent successfully via Fast2SMS (OTP route)',
+          provider: 'Fast2SMS',
+          deliveryId: otpData.request_id || undefined,
+        }
+      }
+
+      routeErrors.push({ route: 'otp', statusCode: otpData.status_code, message: otpData.message })
+      console.warn(`[Fast2SMS] OTP route failed (${otpData.status_code}): ${otpData.message}`)
+    } catch (e: any) {
+      routeErrors.push({ route: 'otp', statusCode: 0, message: e.message })
+      console.warn(`[Fast2SMS] OTP route error: ${e.message}`)
+    }
+
+    // ─── Attempt 3: Transactional Route ───
+    console.log(`[Fast2SMS] Attempt 3: Transactional route for ${maskedPhone}`)
+
+    try {
+      const tResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: {
+          'authorization': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          route: 't',
+          message: `${otpMessage} -EduCampusHub`,
+          language: 'english',
+          flash: 0,
+          numbers: normalizedPhone,
+        }),
+      })
+
+      const tData = await tResponse.json()
+
+      if (tData.return === true) {
+        console.log(`[Fast2SMS] Transactional route SUCCESS for ${maskedPhone} | Request ID: ${tData.request_id || 'N/A'}`)
+        return {
+          success: true,
+          message: 'OTP sent successfully via Fast2SMS (Transactional)',
+          provider: 'Fast2SMS',
+          deliveryId: tData.request_id || undefined,
+        }
+      }
+
+      routeErrors.push({ route: 'transactional', statusCode: tData.status_code, message: tData.message })
+      console.warn(`[Fast2SMS] Transactional route failed (${tData.status_code}): ${tData.message}`)
+    } catch (e: any) {
+      routeErrors.push({ route: 'transactional', statusCode: 0, message: e.message })
+      console.warn(`[Fast2SMS] Transactional route error: ${e.message}`)
+    }
+
+    // ─── Attempt 4: DLT Route (if template configured) ───
+    const dltTemplateId = FAST2SMS_DLT_TEMPLATE_ID()
+    if (dltTemplateId) {
+      console.log(`[Fast2SMS] Attempt 4: DLT route with template ${dltTemplateId}`)
 
       try {
-        const v1Response = await fetch('https://www.fast2sms.com/dev/bulk', {
+        const dltResponse = await fetch('https://www.fast2sms.com/dev/bulkV2', {
           method: 'POST',
           headers: {
             'authorization': apiKey,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            sender_id: 'FSTSMS',
-            message: `Your EduCampusHub OTP is ${otp}. Do not share with anyone.`,
-            language: 'english',
-            route: 'p',
+            route: 'dlt',
+            sender_id: FAST2SMS_SENDER_ID(),
+            message: otpMessage,
+            template_id: dltTemplateId,
             numbers: normalizedPhone,
+            flash: 0,
           }),
         })
 
-        const v1Data = await v1Response.json()
+        const dltData = await dltResponse.json()
 
-        if (v1Data.return === true) {
-          console.log(`[Fast2SMS] V1 route sent successfully to ${normalizedPhone.slice(0, 2)}****${normalizedPhone.slice(-2)}`)
+        if (dltData.return === true) {
+          console.log(`[Fast2SMS] DLT route SUCCESS for ${maskedPhone} | Request ID: ${dltData.request_id || 'N/A'}`)
           return {
             success: true,
-            message: 'OTP sent successfully via Fast2SMS (V1)',
+            message: 'OTP sent successfully via Fast2SMS (DLT)',
             provider: 'Fast2SMS',
-            deliveryId: v1Data.request_id || undefined,
+            deliveryId: dltData.request_id || undefined,
           }
         }
 
-        console.warn(`[Fast2SMS] V1 route also failed: ${JSON.stringify(v1Data)}`)
-      } catch (v1Error: any) {
-        console.warn(`[Fast2SMS] V1 route error: ${v1Error.message}`)
-      }
-
-      console.error(`[Fast2SMS] All routes failed for ${normalizedPhone}`)
-      return {
-        success: false,
-        message: `Fast2SMS delivery failed. Your Fast2SMS account needs setup: 1) Go to fast2sms.com → OTP Message menu → Verify website, OR 2) Add ₹100+ balance for transactional routes. Current errors: OTP route: ${otpData.message}. Quick route needs ₹100 transaction.`,
-        provider: 'Fast2SMS',
-        error: JSON.stringify({ otpRoute: otpData, transRoute: tData, quickRoute: qData }),
+        routeErrors.push({ route: 'dlt', statusCode: dltData.status_code, message: dltData.message })
+        console.warn(`[Fast2SMS] DLT route failed (${dltData.status_code}): ${dltData.message}`)
+      } catch (e: any) {
+        routeErrors.push({ route: 'dlt', statusCode: 0, message: e.message })
+        console.warn(`[Fast2SMS] DLT route error: ${e.message}`)
       }
     }
 
-    // If OTP route failed for other reasons (not verification)
-    if (otpRouteNeedsTransaction) {
-      return {
-        success: false,
-        message: `Fast2SMS requires a minimum transaction of ₹100 before using the API. Please add balance and complete a transaction on your Fast2SMS account.`,
-        provider: 'Fast2SMS',
-        error: JSON.stringify({ otpRoute: otpData }),
+    // ─── Attempt 5: V1 Bulk API (legacy fallback) ───
+    console.log(`[Fast2SMS] Attempt 5: Legacy V1 bulk API for ${maskedPhone}`)
+
+    try {
+      const v1Response = await fetch('https://www.fast2sms.com/dev/bulk', {
+        method: 'POST',
+        headers: {
+          'authorization': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender_id: 'FSTSMS',
+          message: otpMessage,
+          language: 'english',
+          route: 'p',
+          numbers: normalizedPhone,
+        }),
+      })
+
+      const v1Data = await v1Response.json()
+
+      if (v1Data.return === true) {
+        console.log(`[Fast2SMS] V1 route SUCCESS for ${maskedPhone}`)
+        return {
+          success: true,
+          message: 'OTP sent successfully via Fast2SMS (V1)',
+          provider: 'Fast2SMS',
+          deliveryId: v1Data.request_id || undefined,
+        }
       }
+
+      routeErrors.push({ route: 'v1_bulk', statusCode: v1Data.status_code, message: v1Data.message })
+      console.warn(`[Fast2SMS] V1 route failed (${v1Data.status_code}): ${v1Data.message}`)
+    } catch (e: any) {
+      routeErrors.push({ route: 'v1_bulk', statusCode: 0, message: e.message })
+      console.warn(`[Fast2SMS] V1 route error: ${e.message}`)
     }
 
-    console.error(`[Fast2SMS] OTP route failed with unexpected error: ${JSON.stringify(otpData)}`)
+    // ─── All routes failed — determine the root cause ───
+    console.error(`[Fast2SMS] All routes failed for ${maskedPhone}. Errors:`, JSON.stringify(routeErrors))
+
+    // Find the most significant error for user feedback
+    const needs999 = routeErrors.find(e => e.statusCode === 999)
+    const needs996 = routeErrors.find(e => e.statusCode === 996)
+    const needs412 = routeErrors.find(e => e.statusCode === 412)
+
+    // Priority: 999 (needs ₹100 transaction) > 996 (needs website verification) > 412 (auth) > other
+    const primaryError = needs999 || needs996 || needs412 || routeErrors[0]
+    const classification = classifyFast2SMSError(primaryError.statusCode, primaryError.message)
+
     return {
       success: false,
-      message: `Fast2SMS delivery failed: ${otpData.message || 'Unknown error'}`,
+      message: classification.userMessage,
       provider: 'Fast2SMS',
-      error: JSON.stringify({ otpRoute: otpData }),
+      error: JSON.stringify(routeErrors),
+      needsAccountSetup: classification.needsAccountSetup,
+      setupInstructions: classification.setupInstructions,
     }
   } catch (error: any) {
-    console.error(`[Fast2SMS] Network error for ${normalizedPhone}:`, error.message)
+    console.error(`[Fast2SMS] Network error for ${maskedPhone}:`, error.message)
     return {
       success: false,
       message: `Fast2SMS network error: ${error.message}`,
@@ -564,29 +633,27 @@ export async function sendOTPSMS(phone: string, otp: string): Promise<SMSResult>
   console.log(`[OTP] Configured providers: ${getConfiguredProviders().join(', ')}`)
 
   // ─── Try Fast2SMS (Primary) ───
-  let lastProviderError = ''
   if (FAST2SMS_API_KEY()) {
     const result = await sendViaFast2SMS(normalizedPhone, otp)
     if (result.success) return result
-    lastProviderError = result.error || result.message
     console.warn(`[OTP] Fast2SMS failed: ${result.message}. Error: ${result.error}`)
+    // If Fast2SMS needs account setup, return immediately with setup instructions
+    // (no point trying MSG91 if Fast2SMS is misconfigured)
+    if (result.needsAccountSetup) {
+      return result
+    }
   }
 
   // ─── Try MSG91 (Fallback) ───
   if (MSG91_AUTH_KEY()) {
     const result = await sendViaMSG91(normalizedPhone, otp)
     if (result.success) return result
-    lastProviderError = result.error || result.message
     console.warn(`[OTP] MSG91 also failed: ${result.message}. Error: ${result.error}`)
   }
 
   // ─── Console Log (Last Resort) ───
   // In development, this allows testing. In production, this returns failure.
   const consoleResult = await sendViaConsole(normalizedPhone, otp)
-  // Include the actual provider error in the console fallback result for debugging
-  if (lastProviderError) {
-    consoleResult.message = `SMS delivery failed: ${lastProviderError}`
-  }
   return consoleResult
 }
 
@@ -596,7 +663,7 @@ export async function cleanupExpiredOTPs() {
   try {
     const sql = getNeonSql()
     const result = await sql`DELETE FROM "PasswordResetOTP" WHERE "expiresAt" < CURRENT_TIMESTAMP`
-    return result.count || 0
+    return (result as any).count || 0
   } catch {
     return 0
   }

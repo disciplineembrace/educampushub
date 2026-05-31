@@ -103,8 +103,10 @@ export async function POST(request: Request) {
       if (!smsResult.success) {
         console.error(`[Forgot Password] SMS delivery failed for ${normalizedPhone}: ${smsResult.error}`)
         return NextResponse.json({
-          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}. Please try again later.`,
+          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}`,
           smsError: true,
+          needsAccountSetup: smsResult.needsAccountSetup || false,
+          setupInstructions: smsResult.setupInstructions || '',
         }, { status: 503 })
       }
 

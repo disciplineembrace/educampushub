@@ -145,7 +145,11 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
       const data = await res.json()
 
       if (!res.ok) {
-        setTwoFactorError(data.error || 'Failed to send OTP')
+        if (data.smsError && data.needsAccountSetup) {
+          setTwoFactorError(`OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`)
+        } else {
+          setTwoFactorError(data.error || 'Failed to send OTP')
+        }
         return
       }
 
@@ -233,7 +237,11 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
       }
 
       if (!res.ok) {
-        setForgotError(data.error || 'Failed to send OTP')
+        if (data.smsError && data.needsAccountSetup) {
+          setForgotError(`OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`)
+        } else {
+          setForgotError(data.error || 'Failed to send OTP')
+        }
         return
       }
 
@@ -301,7 +309,11 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
       const data = await res.json()
 
       if (!res.ok) {
-        setOtpError(data.error || 'Failed to resend OTP')
+        if (data.smsError && data.needsAccountSetup) {
+          setOtpError(`OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`)
+        } else {
+          setOtpError(data.error || 'Failed to resend OTP')
+        }
         return
       }
 
