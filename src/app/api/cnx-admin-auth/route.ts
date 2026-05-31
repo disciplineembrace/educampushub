@@ -10,6 +10,8 @@ import {
   cleanupExpiredOTPs,
   checkOTPVerifyAttempts,
   incrementVerifyAttempt,
+  isSmsProviderConfigured,
+  getConfiguredProviders,
 } from '@/lib/otp-utils'
 
 // Rate limiting in-memory (production would use Redis)
@@ -107,8 +109,8 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP(email, user.phone, otp)
 
-      // Send OTP via SMS
-      await sendOTPSMS(user.phone, otp)
+      // Send OTP via SMS (multi-provider with fallback)
+      const smsResult = await sendOTPSMS(user.phone, otp)
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
@@ -116,20 +118,36 @@ export async function POST(request: Request) {
       // Mask phone for response
       const maskedPhone = user.phone.slice(0, 2) + '****' + user.phone.slice(-2)
 
+      // If SMS completely failed (invalid phone), return error
+      if (!smsResult.success) {
+        console.error(`[2FA] SMS delivery failed for ${email}: ${smsResult.error}`)
+        return NextResponse.json({
+          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}. Please try again or contact support.`,
+          smsError: true,
+        }, { status: 503 })
+      }
+
       // Create audit log for 2FA attempt
       const sql = getNeonSql()
       const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null
       await sql`
         INSERT INTO "AuditLog" (id, "actorId", action, "targetType", "targetId", details, "ipAddress", "createdAt")
         VALUES (gen_random_uuid(), ${user.id}, '2fa_otp_sent', 'user', ${user.id},
-        ${JSON.stringify({ maskedPhone })}, ${ip}, CURRENT_TIMESTAMP)
+        ${JSON.stringify({ maskedPhone, provider: smsResult.provider, deliveryId: smsResult.deliveryId })}, ${ip}, CURRENT_TIMESTAMP)
       `
+
+      // Warn if using console_log (no real SMS provider)
+      const isConsoleFallback = smsResult.provider === 'console_log'
 
       return NextResponse.json({
         success: true,
-        message: `OTP sent to ${maskedPhone}`,
+        message: isConsoleFallback
+          ? `OTP generated but no SMS provider configured. Contact admin.`
+          : `OTP sent to ${maskedPhone}`,
         maskedPhone,
         requiresOTP: true,
+        provider: smsResult.provider,
+        ...(isConsoleFallback && { warning: 'OTP was not actually delivered via SMS. Configure MSG91 or Fast2SMS.' }),
         ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }

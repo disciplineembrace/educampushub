@@ -9,6 +9,8 @@ import {
   getAdminPhone,
   checkOTPRateLimit,
   cleanupExpiredOTPs,
+  isSmsProviderConfigured,
+  getConfiguredProviders,
 } from '@/lib/otp-utils'
 
 // ─── Rate Limiting for forgot-password endpoint ───
@@ -90,8 +92,8 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP(email, phone, otp)
 
-      // Send OTP via SMS
-      await sendOTPSMS(phone, otp)
+      // Send OTP via SMS (multi-provider with fallback)
+      const smsResult = await sendOTPSMS(phone, otp)
 
       // Cleanup expired OTPs
       cleanupExpiredOTPs().catch(() => {})
@@ -99,10 +101,26 @@ export async function POST(request: Request) {
       // Mask phone for response
       const maskedPhone = phone.slice(0, 2) + '****' + phone.slice(-2)
 
+      // If SMS completely failed (invalid phone), return error
+      if (!smsResult.success) {
+        console.error(`[Admin Forgot Password] SMS delivery failed for ${email}: ${smsResult.error}`)
+        return NextResponse.json({
+          error: `Failed to send OTP to ${maskedPhone}. ${smsResult.message}. Please try again later.`,
+          smsError: true,
+        }, { status: 503 })
+      }
+
+      // Warn if using console_log (no real SMS provider)
+      const isConsoleFallback = smsResult.provider === 'console_log'
+
       return NextResponse.json({
         success: true,
-        message: `OTP sent to ${maskedPhone}`,
+        message: isConsoleFallback
+          ? 'OTP generated but no SMS provider configured. Contact admin.'
+          : `OTP sent to ${maskedPhone}`,
         maskedPhone,
+        provider: smsResult.provider,
+        ...(isConsoleFallback && { warning: 'OTP was not actually delivered via SMS. Configure MSG91 or Fast2SMS.' }),
         ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       })
     }
