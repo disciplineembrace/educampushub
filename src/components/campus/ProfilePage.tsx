@@ -35,6 +35,8 @@ interface UserListing {
   sellingPrice: number
   originalPrice: number
   category: string
+  state: string
+  district: string
   city: string
   condition: string
   isSold: boolean
@@ -136,7 +138,9 @@ export default function ProfilePage() {
       standard: listing.standard || null,
       board: listing.board || null,
       college: listing.college || null,
-      city: listing.city,
+      state: listing.state || '',
+      district: listing.district || '',
+      city: listing.city || '',
       condition: listing.condition,
       whatsappNumber: listing.whatsappNumber || '',
       images: listing.images,
@@ -396,13 +400,15 @@ export default function ProfilePage() {
                 {wishlistListings.map(listing => {
                   const lcat = CATEGORIES.find(c => c.id === listing.category)
                   const listingImgs = parseListingImages(listing.images)
+                  const imgBgClass = listingImgs.length > 0 ? '' : 'bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center'
+                  const catBgClass = lcat?.color || 'from-gray-400 to-gray-500'
                   return (
                     <Card
                       key={listing.id}
                       className="overflow-hidden cursor-pointer hover:shadow-md transition-all card-premium"
                       onClick={() => { setSelectedProductId(listing.id); setCurrentPage('product') }}
                     >
-                      <div className={`aspect-[4/3] ${listingImgs.length > 0 ? '' : `bg-gradient-to-br ${lcat?.color || 'from-gray-400 to-gray-500'} flex items-center justify-center'}`}>
+                      <div className={`aspect-[4/3] ${listingImgs.length > 0 ? imgBgClass : `bg-gradient-to-br ${catBgClass} flex items-center justify-center`}`}>
                         {listingImgs.length > 0 ? (
                           <img src={listingImgs[0]} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
                         ) : (

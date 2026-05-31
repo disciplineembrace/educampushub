@@ -34,6 +34,8 @@ export async function GET(request: Request) {
     const standard = searchParams.get('standard')
     const isDigital = searchParams.get('isDigital')
     const sellerId = searchParams.get('sellerId')
+    const state = searchParams.get('state')
+    const district = searchParams.get('district')
 
     const where: Record<string, unknown> = { isSold: false }
 
@@ -48,6 +50,8 @@ export async function GET(request: Request) {
     if (standard && standard !== 'all') where.standard = standard
     if (isDigital === 'true') where.isDigital = true
     if (sellerId) where.sellerId = sellerId
+    if (state) where.state = state
+    if (district) where.district = district
     if (search) {
       where.OR = [
         { title: { contains: search } },
@@ -90,11 +94,15 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { title, description, originalPrice, sellingPrice, category, subcategory, listingType, course, semester, standard, board, college, city, condition, whatsappNumber, sellerId, isDigital, fileUrl, images } = body
+    const { title, description, originalPrice, sellingPrice, category, subcategory, listingType, course, semester, standard, board, college, state, district, city, condition, whatsappNumber, sellerId, isDigital, fileUrl, images } = body
 
     // Validate required fields
-    if (!title || !description || !category || !city || !condition || !whatsappNumber || !sellerId) {
-      return NextResponse.json({ error: 'Missing required fields: title, description, category, city, condition, whatsappNumber, sellerId are required' }, { status: 400 })
+    if (!title || !description || !category || !condition || !whatsappNumber || !sellerId) {
+      return NextResponse.json({ error: 'Missing required fields: title, description, category, condition, whatsappNumber, sellerId are required' }, { status: 400 })
+    }
+
+    if (!state && !city) {
+      return NextResponse.json({ error: 'State and district (or city) are required' }, { status: 400 })
     }
 
     // Validate selling price
@@ -174,7 +182,9 @@ export async function POST(request: Request) {
           standard: standard || null,
           board: board || null,
           college: college || null,
-          city,
+          state: state || '',
+          district: district || '',
+          city: city || district || '',
           condition,
           whatsappNumber: whatsappNumber.replace(/\s/g, ''),
           sellerId,
@@ -240,7 +250,7 @@ export async function PATCH(request: Request) {
     }
 
     // Whitelist allowed update fields for regular users
-    const allowedFields = ['title', 'description', 'originalPrice', 'sellingPrice', 'category', 'subcategory', 'listingType', 'course', 'semester', 'standard', 'board', 'college', 'city', 'condition', 'whatsappNumber', 'images', 'isSold', 'isDigital', 'fileUrl']
+    const allowedFields = ['title', 'description', 'originalPrice', 'sellingPrice', 'category', 'subcategory', 'listingType', 'course', 'semester', 'standard', 'board', 'college', 'state', 'district', 'city', 'condition', 'whatsappNumber', 'images', 'isSold', 'isDigital', 'fileUrl']
     const sanitizedUpdates: Record<string, unknown> = {}
     for (const key of allowedFields) {
       if (updates[key] !== undefined) {

@@ -38,6 +38,8 @@ export interface EditingListingData {
   standard: string | null
   board: string | null
   college: string | null
+  state: string
+  district: string
   city: string
   condition: string
   whatsappNumber: string
@@ -184,6 +186,7 @@ export function getCategoryTranslationKey(categoryId: string): string {
   return cat?.translationKey || categoryId
 }
 
+// Kept for backward compatibility with User profile city field
 export const INDIAN_CITIES = [
   'Delhi', 'Mumbai', 'Bangalore', 'Chennai', 'Kolkata',
   'Hyderabad', 'Pune', 'Jaipur', 'Lucknow', 'Ahmedabad',

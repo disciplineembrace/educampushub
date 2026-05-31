@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Heart, MessageCircle, MapPin, Star, Shield, BadgeCheck, Eye, Flag, BookOpen, Share2, Clock, Bookmark, BookOpenCheck } from 'lucide-react'
-import { useAppStore, formatINR, CATEGORIES, parseListingImages } from '@/lib/store'
+import { ArrowLeft, Heart, MessageCircle, MapPin, Star, Shield, BadgeCheck, Eye, Flag, BookOpen, Share2, Clock, Bookmark, BookOpenCheck, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { useAppStore, formatINR, CATEGORIES, parseListingImages, type EditingListingData } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -14,7 +14,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
+import { toast } from 'sonner'
 
 interface ListingDetail {
   id: string
@@ -26,6 +29,8 @@ interface ListingDetail {
   course: string | null
   semester: string | null
   college: string | null
+  state: string
+  district: string
   city: string
   condition: string
   whatsappNumber: string
@@ -51,13 +56,15 @@ interface ListingDetail {
 }
 
 export default function ProductDetailPage() {
-  const { selectedProductId, setCurrentPage, wishlist, toggleWishlist, currentUser, savedMaterials, toggleSavedMaterial, addRecentlyViewed } = useAppStore()
+  const { selectedProductId, setCurrentPage, wishlist, toggleWishlist, currentUser, savedMaterials, toggleSavedMaterial, addRecentlyViewed, setEditingListing } = useAppStore()
   const [listing, setListing] = useState<ListingDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [reportReason, setReportReason] = useState('')
   const [reportOpen, setReportOpen] = useState(false)
   const [reported, setReported] = useState(false)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!selectedProductId) return
@@ -76,6 +83,58 @@ export default function ProductDetailPage() {
     }
     fetchListing()
   }, [selectedProductId])
+
+  const isOwner = currentUser && listing && currentUser.id === listing.seller.id
+  const locationDisplay = listing ? (listing.district && listing.state ? `${listing.district}, ${listing.state}` : listing.city) : ''
+
+  const handleEdit = () => {
+    if (!listing || !currentUser) return
+    const editingData: EditingListingData = {
+      id: listing.id,
+      title: listing.title,
+      description: listing.description,
+      originalPrice: listing.originalPrice,
+      sellingPrice: listing.sellingPrice,
+      category: listing.category,
+      subcategory: null,
+      listingType: listing.listingType,
+      course: listing.course,
+      semester: listing.semester,
+      standard: null,
+      board: null,
+      college: listing.college,
+      state: listing.state,
+      district: listing.district,
+      city: listing.city,
+      condition: listing.condition,
+      whatsappNumber: listing.whatsappNumber,
+      images: listing.images,
+      isDigital: listing.isDigital,
+      fileUrl: null,
+    }
+    setEditingListing(editingData)
+    setCurrentPage('editListing')
+  }
+
+  const handleDelete = async () => {
+    if (!listing || !currentUser) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/listings?id=${listing.id}&sellerId=${currentUser.id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Listing deleted successfully!')
+        setCurrentPage('explore')
+      } else {
+        toast.error(data.error || 'Failed to delete listing')
+      }
+    } catch {
+      toast.error('Network error. Please try again.')
+    } finally {
+      setDeleting(false)
+      setDeleteDialogOpen(false)
+    }
+  }
 
   const isWishlisted = listing ? wishlist.includes(listing.id) : false
   const isSaved = listing ? savedMaterials.includes(listing.id) : false
@@ -259,7 +318,7 @@ export default function ProductDetailPage() {
                 <Badge variant="secondary" className={`gap-1 rounded-full ${conditionColor[listing.condition] || ''}`}>
                   {listing.condition}
                 </Badge>
-                <Badge variant="secondary" className="gap-1 rounded-full"><MapPin className="w-3 h-3" />{listing.city}</Badge>
+                <Badge variant="secondary" className="gap-1 rounded-full"><MapPin className="w-3 h-3" />{locationDisplay}</Badge>
                 {listing.course && <Badge variant="secondary" className="rounded-full">{listing.course}</Badge>}
                 {listing.semester && <Badge variant="secondary" className="rounded-full">{listing.semester} Semester</Badge>}
                 <Badge variant="secondary" className="gap-1 rounded-full"><Eye className="w-3 h-3" />{listing.views} views</Badge>
@@ -302,6 +361,26 @@ export default function ProductDetailPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Owner Actions */}
+              {isOwner && (
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleEdit}
+                    className="flex-1 h-11 rounded-xl gap-2 border-brand/30 text-brand hover:bg-brand/5"
+                  >
+                    <Pencil className="w-4 h-4" /> Edit Listing
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setDeleteDialogOpen(true)}
+                    className="flex-1 h-11 rounded-xl gap-2 border-red-300 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                  >
+                    <Trash2 className="w-4 h-4" /> Delete Listing
+                  </Button>
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div className="space-y-3 pt-2">
@@ -408,6 +487,26 @@ export default function ProductDetailPage() {
                   </Dialog>
                 )}
               </div>
+              {/* Delete Confirmation Dialog */}
+              <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Delete Listing</DialogTitle>
+                    <DialogDescription>
+                      Are you sure you want to delete &quot;{listing?.title}&quot;? This action cannot be undone.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter className="gap-2 sm:gap-0">
+                    <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl">
+                      Cancel
+                    </Button>
+                    <Button variant="destructive" onClick={handleDelete} disabled={deleting} className="rounded-xl gap-2">
+                      {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      Delete Permanently
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </motion.div>
         </div>

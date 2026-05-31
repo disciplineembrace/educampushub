@@ -53,7 +53,9 @@ model Listing {
   standard       String?
   board          String?
   college        String?
-  city           String
+  state          String     @default("")
+  district       String     @default("")
+  city           String     @default("")
   condition      String
   images         String     @default("[]")
   whatsappNumber String

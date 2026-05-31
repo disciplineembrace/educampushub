@@ -10,7 +10,8 @@ import {
   ChevronLeft, RotateCcw, Info, CreditCard, Zap,
   PenTool, Tablet, Notebook, Package, BookMarked, Pencil
 } from 'lucide-react'
-import { useAppStore, CATEGORIES, INDIAN_CITIES, CONDITIONS, SEMESTERS, BOARDS, STANDARDS, LISTING_TYPES, formatINR, parseListingImages, getCategoryTranslationKey } from '@/lib/store'
+import { useAppStore, CATEGORIES, CONDITIONS, SEMESTERS, BOARDS, STANDARDS, LISTING_TYPES, formatINR, parseListingImages, getCategoryTranslationKey } from '@/lib/store'
+import { INDIAN_STATES, INDIAN_DISTRICTS } from '@/lib/indian-states-districts'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -125,7 +126,8 @@ export default function EditListingPage() {
     standard: '',
     board: '',
     college: '',
-    city: '',
+    state: '',
+    district: '',
     condition: '',
     whatsappNumber: '',
   })
@@ -172,7 +174,8 @@ export default function EditListingPage() {
       standard: editingListing.standard || '',
       board: editingListing.board || '',
       college: editingListing.college || '',
-      city: editingListing.city || '',
+      state: editingListing.state || '',
+      district: editingListing.district || '',
       condition: editingListing.condition || '',
       whatsappNumber: editingListing.whatsappNumber || '',
     })
@@ -382,7 +385,8 @@ export default function EditListingPage() {
 
     if (!form.category) errors.category = 'Category is required'
     if (!form.condition) errors.condition = 'Condition is required'
-    if (!form.city) errors.city = 'City is required'
+    if (!form.state) errors.state = 'State is required'
+    if (!form.district) errors.district = 'District is required'
 
     if (!form.whatsappNumber.trim()) {
       errors.whatsappNumber = 'WhatsApp number is required'
@@ -450,7 +454,9 @@ export default function EditListingPage() {
         standard: form.standard || null,
         board: form.board || null,
         college: form.college || null,
-        city: form.city,
+        state: form.state,
+        district: form.district,
+        city: form.district, // backward compat
         condition: form.condition,
         whatsappNumber: form.whatsappNumber.trim(),
         images: JSON.stringify(imageUrls),
@@ -771,47 +777,70 @@ export default function EditListingPage() {
             )}
           </div>
 
-          {/* Condition & City */}
+          {/* Condition */}
+          <div data-error={!!validationErrors.condition}>
+            <Label className="mb-1.5 block">Condition *</Label>
+            <Select
+              value={form.condition || undefined}
+              onValueChange={v => handleChange('condition', v)}
+            >
+              <SelectTrigger className={`h-11 rounded-xl ${validationErrors.condition ? 'border-red-500' : ''}`}>
+                <SelectValue placeholder="Select condition" />
+              </SelectTrigger>
+              <SelectContent>
+                {CONDITIONS.map(c => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {validationErrors.condition && (
+              <span className="text-xs text-red-500 flex items-center gap-1 mt-1">
+                <AlertCircle className="w-3 h-3" /> {validationErrors.condition}
+              </span>
+            )}
+          </div>
+
+          {/* State & District */}
           <div className="grid grid-cols-2 gap-4">
-            <div data-error={!!validationErrors.condition}>
-              <Label className="mb-1.5 block">Condition *</Label>
+            <div data-error={!!validationErrors.state}>
+              <Label className="mb-1.5 block">State *</Label>
               <Select
-                value={form.condition || undefined}
-                onValueChange={v => handleChange('condition', v)}
+                value={form.state || undefined}
+                onValueChange={v => {
+                  handleChange('state', v)
+                  handleChange('district', '')
+                }}
               >
-                <SelectTrigger className={`h-11 rounded-xl ${validationErrors.condition ? 'border-red-500' : ''}`}>
-                  <SelectValue placeholder="Select condition" />
+                <SelectTrigger className={`h-11 rounded-xl ${validationErrors.state ? 'border-red-500' : ''}`}>
+                  <SelectValue placeholder="Select state" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CONDITIONS.map(c => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
+                  {INDIAN_STATES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {validationErrors.condition && (
+              {validationErrors.state && (
                 <span className="text-xs text-red-500 flex items-center gap-1 mt-1">
-                  <AlertCircle className="w-3 h-3" /> {validationErrors.condition}
+                  <AlertCircle className="w-3 h-3" /> {validationErrors.state}
                 </span>
               )}
             </div>
-            <div data-error={!!validationErrors.city}>
-              <Label className="mb-1.5 block">City *</Label>
+            <div data-error={!!validationErrors.district}>
+              <Label className="mb-1.5 block">District *</Label>
               <Select
-                value={form.city || undefined}
-                onValueChange={v => handleChange('city', v)}
+                value={form.district || undefined}
+                onValueChange={v => handleChange('district', v)}
+                disabled={!form.state}
               >
-                <SelectTrigger className={`h-11 rounded-xl ${validationErrors.city ? 'border-red-500' : ''}`}>
-                  <SelectValue placeholder="Select city" />
+                <SelectTrigger className={`h-11 rounded-xl ${validationErrors.district ? 'border-red-500' : ''}`}>
+                  <SelectValue placeholder={form.state ? 'Select district' : 'Select state first'} />
                 </SelectTrigger>
                 <SelectContent>
-                  {INDIAN_CITIES.map(c => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
+                  {(INDIAN_DISTRICTS[form.state] || []).map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {validationErrors.city && (
+              {validationErrors.district && (
                 <span className="text-xs text-red-500 flex items-center gap-1 mt-1">
-                  <AlertCircle className="w-3 h-3" /> {validationErrors.city}
+                  <AlertCircle className="w-3 h-3" /> {validationErrors.district}
                 </span>
               )}
             </div>

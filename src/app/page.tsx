@@ -25,6 +25,7 @@ import PrivacyPage from '@/components/campus/PrivacyPage'
 import BookReaderPage from '@/components/campus/BookReaderPage'
 import LearningDashboard from '@/components/campus/LearningDashboard'
 import SavedMaterialsPage from '@/components/campus/SavedMaterialsPage'
+import EditListingPage from '@/components/campus/EditListingPage'
 import CategoryExplorerPage from '@/components/campus/CategoryExplorerPage'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
 
@@ -56,6 +57,7 @@ const PAGE_COMPONENTS: Record<PageType, React.ComponentType> = {
   dashboard: LearningDashboard,
   saved: SavedMaterialsPage,
   categories: CategoryExplorerPage,
+  editListing: EditListingPage,
 }
 
 function MobileBottomNav({ navItems }: { navItems: { icon: React.ElementType; label: string; page: PageType; isCenter?: boolean }[] }) {
