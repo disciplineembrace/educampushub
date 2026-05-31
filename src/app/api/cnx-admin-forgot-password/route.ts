@@ -84,20 +84,49 @@ export async function POST(request: Request) {
       const otp = generateOTP()
       await storeOTP({ email, phone: user.phone || undefined, otpCode: otp, purpose: 'admin_forgot_password' })
 
-      // Send OTP via Brevo Email - call sendOTPEmail directly for debugging
+      // Send OTP via Brevo Email - direct API call to avoid any module issues
       console.log(`[ADMIN-FORGOT-PW] Sending OTP to ${email}, purpose=admin_forgot_password`)
+      console.log(`[ADMIN-FORGOT-PW] BREVO_API_KEY exists: ${!!process.env.BREVO_API_KEY}, length: ${process.env.BREVO_API_KEY?.length || 0}`)
       
-      // Direct Brevo email call for debugging
-      const directEmailResult = await sendOTPEmail({
-        to: email,
-        otp: otp,
-        purpose: 'admin_forgot_password',
-        userName: user.name,
-        expiryMinutes: 5,
-      })
-      console.log(`[ADMIN-FORGOT-PW] Direct email result:`, JSON.stringify(directEmailResult))
+      let emailSent = false
+      let emailMessage = ''
       
-      const emailSent = directEmailResult.success
+      // Try direct Brevo API call as primary method
+      const brevoKey = process.env.BREVO_API_KEY
+      if (brevoKey) {
+        try {
+          const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+              'api-key': brevoKey,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({
+              sender: { name: 'EduCampusHub', email: 'disciplineembrace@gmail.com' },
+              to: [{ email: email, name: user.name || email.split('@')[0] }],
+              subject: `Your EduCampusHub Verification Code: ${otp}`,
+              htmlContent: `<div style="font-family:Arial,sans-serif;text-align:center;padding:40px"><h2 style="color:#002868">EduCampusHub</h2><p style="font-size:15px">Hello ${user.name || ''},</p><p style="font-size:15px">Use the verification code below to reset your admin password:</p><p style="font-size:36px;font-weight:bold;color:#FF6600;letter-spacing:8px">${otp}</p><p style="font-size:13px;color:#666">This code expires in 5 minutes. Do not share it with anyone.</p><p style="font-size:14px;color:#666">If you didn't request this, you can safely ignore this email.</p></div>`,
+              textContent: `EduCampusHub Admin Password Reset Code: ${otp}. Expires in 5 minutes.`,
+            }),
+          })
+          const brevoData = await brevoResponse.json()
+          console.log(`[ADMIN-FORGOT-PW] Brevo API response:`, JSON.stringify(brevoData))
+          
+          if (brevoResponse.ok && brevoData.messageId) {
+            emailSent = true
+            emailMessage = 'OTP sent to your email'
+          } else {
+            emailMessage = brevoData.message || 'Brevo API error'
+          }
+        } catch (err) {
+          emailMessage = `Brevo error: ${(err as Error).message}`
+          console.error(`[ADMIN-FORGOT-PW] Brevo API error:`, err)
+        }
+      } else {
+        emailMessage = 'BREVO_API_KEY not found in environment'
+        console.error(`[ADMIN-FORGOT-PW] BREVO_API_KEY not available!`)
+      }
       const smsSent = false
 
       // Cleanup expired OTPs
@@ -120,7 +149,7 @@ export async function POST(request: Request) {
         emailSent,
         smsSent,
         _debug_otp: otp,
-        _debug_email_detail: directEmailResult,
+        _debug_email_msg: emailMessage,
       })
     }
 
