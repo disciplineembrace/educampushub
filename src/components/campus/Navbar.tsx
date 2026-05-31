@@ -139,7 +139,7 @@ export default function Navbar() {
                     )}
                   </motion.div>
                 ) : (
-                  <Button variant="ghost" size="icon" onClick={() => setSearchOpen(true)} className="h-9 w-9 rounded-xl">
+                  <Button variant="ghost" size="icon" onClick={() => setSearchOpen(true)} className="h-9 w-9 rounded-xl" aria-label="Search">
                     <Search className="w-4 h-4" />
                   </Button>
                 )}
@@ -149,7 +149,7 @@ export default function Navbar() {
               <LanguageSwitcher />
 
               {/* Dark Mode Toggle */}
-              <Button variant="ghost" size="icon" onClick={toggleDarkMode} className="h-9 w-9 rounded-full">
+              <Button variant="ghost" size="icon" onClick={toggleDarkMode} className="h-9 w-9 rounded-full" aria-label="Toggle dark mode">
                 <AnimatePresence mode="wait">
                   {darkMode ? (
                     <motion.div key="sun" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={{ duration: 0.2 }}>
@@ -169,6 +169,7 @@ export default function Navbar() {
                 size="icon"
                 onClick={() => setCurrentPage('wishlist')}
                 className="h-9 w-9 rounded-xl relative"
+                aria-label="Wishlist"
               >
                 <Heart className="w-4 h-4" />
                 {wishlist.length > 0 && (
@@ -243,7 +244,7 @@ export default function Navbar() {
             {/* Mobile Right Section */}
             <div className="flex md:hidden items-center gap-1">
               <LanguageSwitcher />
-              <Button variant="ghost" size="icon" onClick={toggleDarkMode} className="h-9 w-9">
+              <Button variant="ghost" size="icon" onClick={toggleDarkMode} className="h-9 w-9" aria-label="Toggle dark mode">
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </Button>
               <Button
@@ -251,6 +252,7 @@ export default function Navbar() {
                 size="icon"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="h-9 w-9"
+                aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
               >
                 {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </Button>

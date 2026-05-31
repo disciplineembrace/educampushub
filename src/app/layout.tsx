@@ -117,7 +117,7 @@ export const metadata: Metadata = {
   },
   manifest: "/manifest.json",
   verification: {
-    google: "google-site-verification=PENDING",
+    // google: "google-site-verification=ACTUAL_CODE_HERE",
   },
   other: {
     'mobile-web-app-capable': 'yes',
