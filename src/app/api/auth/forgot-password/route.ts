@@ -117,6 +117,8 @@ export async function POST(request: Request) {
             fast2smsSet: !!process.env.FAST2SMS_API_KEY,
             smsProvider: smsResult.provider,
             smsError: smsResult.error,
+            smsMessage: smsResult.message,
+            isConsoleFallback: smsResult.isConsoleFallback,
           }
         }, { status: 503 })
       }

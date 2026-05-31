@@ -470,22 +470,29 @@ export async function sendOTPSMS(phone: string, otp: string): Promise<SMSResult>
   console.log(`[OTP] Configured providers: ${getConfiguredProviders().join(', ')}`)
 
   // ─── Try Fast2SMS (Primary) ───
+  let lastProviderError = ''
   if (FAST2SMS_API_KEY()) {
     const result = await sendViaFast2SMS(normalizedPhone, otp)
     if (result.success) return result
-    console.warn(`[OTP] Fast2SMS failed, trying MSG91 fallback...`)
+    lastProviderError = result.error || result.message
+    console.warn(`[OTP] Fast2SMS failed: ${result.message}. Error: ${result.error}`)
   }
 
   // ─── Try MSG91 (Fallback) ───
   if (MSG91_AUTH_KEY()) {
     const result = await sendViaMSG91(normalizedPhone, otp)
     if (result.success) return result
-    console.warn(`[OTP] MSG91 also failed, falling back to console log...`)
+    lastProviderError = result.error || result.message
+    console.warn(`[OTP] MSG91 also failed: ${result.message}. Error: ${result.error}`)
   }
 
   // ─── Console Log (Last Resort) ───
   // In development, this allows testing. In production, this returns failure.
   const consoleResult = await sendViaConsole(normalizedPhone, otp)
+  // Include the actual provider error in the console fallback result for debugging
+  if (lastProviderError) {
+    consoleResult.message = `SMS delivery failed: ${lastProviderError}`
+  }
   return consoleResult
 }
 
