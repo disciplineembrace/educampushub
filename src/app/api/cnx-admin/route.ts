@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getAdminFromCookies, hasPermission, revokeAdminSession, type AdminRole } from '@/lib/admin-auth'
+import { getAdminFromCookies, hasPermission, revokeAdminSession, canManageAdmins, canModifySuperAdmin, hashPassword, type AdminRole } from '@/lib/admin-auth'
 import { cookies } from 'next/headers'
 
 // Verify admin for every request
@@ -101,7 +101,7 @@ export async function GET(request: Request) {
 
   if (type === 'audit-logs') {
     if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const logs = await db.auditLog.findMany({ include: { actor: { select: { name: true, email: true } } }, orderBy: { createdAt: 'desc' }, take: 100 })
+    const logs = await db.auditLog.findMany({ include: { actor: { select: { name: true, email: true, adminRole: true, isSuperAdmin: true } } }, orderBy: { createdAt: 'desc' }, take: 200 })
     return NextResponse.json({ logs })
   }
 
@@ -113,6 +113,41 @@ export async function GET(request: Request) {
       take: 100,
     })
     return NextResponse.json({ payments })
+  }
+
+  // ─── New: Admin accounts list (Super Admin only) ───
+  if (type === 'admin-accounts') {
+    if (!canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
+      return NextResponse.json({ error: 'Only Super Admin can view admin accounts' }, { status: 403 })
+    }
+    const admins = await db.user.findMany({
+      where: { isAdmin: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        adminRole: true,
+        isSuperAdmin: true,
+        twoFactorEnabled: true,
+        isVerified: true,
+        isBanned: true,
+        mustChangePassword: true,
+        createdAt: true,
+        _count: { select: { auditLogs: true, adminSessions: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    // Get recent login info from audit logs
+    const adminsWithLogins = await Promise.all(admins.map(async (a) => {
+      const lastLoginLog = await db.auditLog.findFirst({
+        where: { actorId: a.id, action: { in: ['admin_login', '2fa_login_success'] } },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true, ipAddress: true },
+      })
+      return { ...a, lastLogin: lastLoginLog?.createdAt || null, lastLoginIp: lastLoginLog?.ipAddress || null }
+    }))
+    return NextResponse.json({ admins: adminsWithLogins })
   }
 
   return NextResponse.json({ error: 'Invalid type' }, { status: 400 })
@@ -139,6 +174,13 @@ export async function POST(request: Request) {
       }
       case 'ban_user': {
         if (!hasPermission(admin.role as AdminRole, 'ban_user')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        // Check if target is Super Admin
+        const banTarget = await db.user.findUnique({ where: { id: targetId } })
+        if (!banTarget) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        if (banTarget.isSuperAdmin || banTarget.adminRole === 'super_admin') {
+          const canModify = canModifySuperAdmin(admin.role as AdminRole, admin.isSuperAdmin, true, 'ban')
+          if (!canModify.allowed) return NextResponse.json({ error: canModify.reason }, { status: 403 })
+        }
         await db.user.update({ where: { id: targetId }, data: { isBanned: true } })
         await db.auditLog.create({ data: { actorId: admin.userId, action: 'ban_user', targetType: 'user', targetId, ipAddress: ip, details: details || null } })
         return NextResponse.json({ success: true })
@@ -218,6 +260,17 @@ export async function POST(request: Request) {
       case 'edit_user': {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         if (!updates) return NextResponse.json({ error: 'Missing updates' }, { status: 400 })
+        // Check if target is Super Admin
+        const editTarget = await db.user.findUnique({ where: { id: targetId } })
+        if (!editTarget) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        if (editTarget.isSuperAdmin || editTarget.adminRole === 'super_admin') {
+          const canModify = canModifySuperAdmin(admin.role as AdminRole, admin.isSuperAdmin, true, 'edit')
+          if (!canModify.allowed) return NextResponse.json({ error: canModify.reason }, { status: 403 })
+          // Don't allow changing Super Admin's adminRole or isSuperAdmin
+          delete updates.adminRole
+          delete updates.isSuperAdmin
+          delete updates.isAdmin
+        }
         const allowedUserFields = ['name', 'email', 'college', 'city', 'isVerified', 'phone', 'state', 'district']
         const cleanUserUpdates: Record<string, unknown> = {}
         for (const key of allowedUserFields) {
@@ -241,7 +294,16 @@ export async function POST(request: Request) {
           },
         })
         if (!summaryUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-        if (summaryUser.isAdmin) return NextResponse.json({ error: 'Cannot delete admin accounts' }, { status: 403 })
+        // Super Admin accounts CANNOT be deleted
+        if (summaryUser.isSuperAdmin || summaryUser.adminRole === 'super_admin') {
+          return NextResponse.json({ error: 'Super Admin account cannot be deleted' }, { status: 403 })
+        }
+        if (summaryUser.isAdmin) {
+          // Only Super Admin can delete other admin accounts
+          if (!canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
+            return NextResponse.json({ error: 'Only Super Admin can delete admin accounts' }, { status: 403 })
+          }
+        }
         const totalViewsFromListings = await db.listing.aggregate({ _sum: { views: true }, where: { sellerId: targetId } })
         const totalSavesFromListings = await db.listing.aggregate({ _sum: { saves: true }, where: { sellerId: targetId } })
         const reportsOnUserListings = await db.report.count({ where: { listing: { sellerId: targetId } } })
@@ -249,7 +311,7 @@ export async function POST(request: Request) {
         const verifiedPayments = summaryUser.payments.filter(p => p.status === 'verified')
         const totalSpent = verifiedPayments.reduce((sum, p) => sum + p.amount, 0)
         return NextResponse.json({
-          user: { id: summaryUser.id, name: summaryUser.name, email: summaryUser.email, college: summaryUser.college, phone: summaryUser.phone, state: summaryUser.state, district: summaryUser.district, planType: summaryUser.planType, premiumActive: summaryUser.premiumActive, isVerified: summaryUser.isVerified, createdAt: summaryUser.createdAt },
+          user: { id: summaryUser.id, name: summaryUser.name, email: summaryUser.email, college: summaryUser.college, phone: summaryUser.phone, state: summaryUser.state, district: summaryUser.district, planType: summaryUser.planType, premiumActive: summaryUser.premiumActive, isVerified: summaryUser.isVerified, isAdmin: summaryUser.isAdmin, adminRole: summaryUser.adminRole, createdAt: summaryUser.createdAt },
           resources: {
             listings: summaryUser._count.listings,
             activeListings: summaryUser.listings.filter(l => !l.isSold).length,
@@ -275,9 +337,15 @@ export async function POST(request: Request) {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         const targetUser = await db.user.findUnique({ where: { id: targetId } })
         if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-        if (targetUser.isAdmin) return NextResponse.json({ error: 'Cannot delete admin accounts' }, { status: 403 })
-        // Create audit log BEFORE deleting the user (since audit log references the user as actor)
-        await db.auditLog.create({ data: { actorId: admin.userId, action: 'delete_user', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify({ name: targetUser.name, email: targetUser.email }) } })
+        // Super Admin accounts CANNOT be deleted
+        if (targetUser.isSuperAdmin || targetUser.adminRole === 'super_admin') {
+          return NextResponse.json({ error: 'Super Admin account cannot be deleted' }, { status: 403 })
+        }
+        if (targetUser.isAdmin && !canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
+          return NextResponse.json({ error: 'Only Super Admin can delete admin accounts' }, { status: 403 })
+        }
+        // Create audit log BEFORE deleting the user
+        await db.auditLog.create({ data: { actorId: admin.userId, action: 'delete_user', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify({ name: targetUser.name, email: targetUser.email, isAdmin: targetUser.isAdmin, adminRole: targetUser.adminRole }) } })
         // Delete user's listings and their related data
         const userListings = await db.listing.findMany({ where: { sellerId: targetId }, select: { id: true } })
         const listingIds = userListings.map(l => l.id)
@@ -291,7 +359,7 @@ export async function POST(request: Request) {
         await db.report.deleteMany({ where: { reporterId: targetId } })
         await db.adminSession.deleteMany({ where: { userId: targetId } })
         await db.payment.deleteMany({ where: { userId: targetId } })
-        // Delete audit logs that reference this user as target (not as actor)
+        // Delete audit logs that reference this user as target
         await db.auditLog.deleteMany({ where: { targetId, targetType: 'user' } })
         // Finally delete the user
         await db.user.delete({ where: { id: targetId } })
@@ -323,13 +391,10 @@ export async function POST(request: Request) {
         if (!payment) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
         if (payment.status === 'verified') return NextResponse.json({ error: 'Already verified' }, { status: 400 })
         
-        // Update payment status
         await db.payment.update({ where: { id: targetId }, data: { status: 'verified', verifiedAt: new Date() } })
         
-        // Handle based on payment type
         if (payment.paymentType === 'premium_plan') {
-          // Activate premium plan
-          const premiumExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+          const premiumExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
           await db.user.update({
             where: { id: payment.userId },
             data: {
@@ -343,7 +408,6 @@ export async function POST(request: Request) {
           })
           await db.auditLog.create({ data: { actorId: admin.userId, action: 'approve_premium', targetType: 'payment', targetId, ipAddress: ip, details: JSON.stringify({ amount: payment.amount, userId: payment.userId, plan: 'premium' }) } })
         } else {
-          // Regular upload credit
           await db.user.update({ where: { id: payment.userId }, data: { paidUploadCredits: { increment: payment.uploadCredit } } })
           await db.auditLog.create({ data: { actorId: admin.userId, action: 'approve_payment', targetType: 'payment', targetId, ipAddress: ip, details: JSON.stringify({ amount: payment.amount, userId: payment.userId, credits: payment.uploadCredit }) } })
         }
@@ -410,6 +474,194 @@ export async function POST(request: Request) {
           pendingPayments,
         })
       }
+
+      // ═══════════════════════════════════════════════════════════
+      // SUPER ADMIN: Admin Account Management
+      // ═══════════════════════════════════════════════════════════
+
+      case 'create_admin': {
+        if (!canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
+          return NextResponse.json({ error: 'Only Super Admin can create admin accounts' }, { status: 403 })
+        }
+        const { name, email, phone, password, role: newRole } = updates || {}
+        if (!name || !email || !password) {
+          return NextResponse.json({ error: 'Name, email, and password are required' }, { status: 400 })
+        }
+        // Check if email already exists
+        const existingUser = await db.user.findUnique({ where: { email } })
+        if (existingUser) {
+          return NextResponse.json({ error: 'A user with this email already exists' }, { status: 409 })
+        }
+        // Validate password strength
+        const { validatePasswordStrength } = await import('@/lib/admin-auth')
+        const validation = validatePasswordStrength(password)
+        if (!validation.valid) {
+          return NextResponse.json({ error: validation.errors.join('. ') }, { status: 400 })
+        }
+        // Only super_admin role is allowed, or moderator/support_admin
+        const validRoles = ['super_admin', 'moderator', 'support_admin']
+        const assignedRole = validRoles.includes(newRole) ? newRole : 'support_admin'
+        // Don't allow creating another Super Admin with isSuperAdmin flag
+        const newHash = await hashPassword(password)
+        const newUser = await db.user.create({
+          data: {
+            email,
+            name,
+            phone: phone || null,
+            isAdmin: true,
+            adminRole: assignedRole,
+            isSuperAdmin: false, // Only the seed can set isSuperAdmin
+            twoFactorEnabled: assignedRole === 'super_admin',
+            passwordHash: newHash,
+            mustChangePassword: true,
+            isVerified: true,
+          }
+        })
+        await db.auditLog.create({
+          data: {
+            actorId: admin.userId,
+            action: 'create_admin',
+            targetType: 'user',
+            targetId: newUser.id,
+            ipAddress: ip,
+            details: JSON.stringify({ name, email, role: assignedRole }),
+          }
+        })
+        return NextResponse.json({ success: true, admin: { id: newUser.id, name, email, role: assignedRole } })
+      }
+
+      case 'update_admin_role': {
+        if (!canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
+          return NextResponse.json({ error: 'Only Super Admin can modify admin roles' }, { status: 403 })
+        }
+        const targetAdmin = await db.user.findUnique({ where: { id: targetId } })
+        if (!targetAdmin || !targetAdmin.isAdmin) {
+          return NextResponse.json({ error: 'Admin account not found' }, { status: 404 })
+        }
+        // Cannot modify Super Admin's role
+        if (targetAdmin.isSuperAdmin) {
+          return NextResponse.json({ error: 'Super Admin role cannot be changed' }, { status: 403 })
+        }
+        // Cannot modify own role
+        if (targetAdmin.id === admin.userId) {
+          return NextResponse.json({ error: 'You cannot change your own role' }, { status: 403 })
+        }
+        const validRoles = ['super_admin', 'moderator', 'support_admin']
+        const newRole = updates?.role
+        if (!validRoles.includes(newRole)) {
+          return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+        }
+        await db.user.update({
+          where: { id: targetId },
+          data: {
+            adminRole: newRole,
+            twoFactorEnabled: newRole === 'super_admin' ? true : targetAdmin.twoFactorEnabled,
+          }
+        })
+        await db.auditLog.create({
+          data: {
+            actorId: admin.userId,
+            action: 'update_admin_role',
+            targetType: 'user',
+            targetId,
+            ipAddress: ip,
+            details: JSON.stringify({ oldRole: targetAdmin.adminRole, newRole }),
+          }
+        })
+        return NextResponse.json({ success: true })
+      }
+
+      case 'remove_admin': {
+        if (!canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
+          return NextResponse.json({ error: 'Only Super Admin can remove admin accounts' }, { status: 403 })
+        }
+        const removeTarget = await db.user.findUnique({ where: { id: targetId } })
+        if (!removeTarget || !removeTarget.isAdmin) {
+          return NextResponse.json({ error: 'Admin account not found' }, { status: 404 })
+        }
+        // Cannot remove Super Admin
+        if (removeTarget.isSuperAdmin) {
+          return NextResponse.json({ error: 'Super Admin account cannot be removed' }, { status: 403 })
+        }
+        // Cannot remove yourself
+        if (removeTarget.id === admin.userId) {
+          return NextResponse.json({ error: 'You cannot remove your own admin access' }, { status: 403 })
+        }
+        // Demote to regular user
+        await db.user.update({
+          where: { id: targetId },
+          data: {
+            isAdmin: false,
+            adminRole: null,
+            twoFactorEnabled: false,
+            isSuperAdmin: false,
+          }
+        })
+        // Revoke all admin sessions
+        await db.adminSession.updateMany({
+          where: { userId: targetId, isRevoked: false },
+          data: { isRevoked: true },
+        })
+        await db.auditLog.create({
+          data: {
+            actorId: admin.userId,
+            action: 'remove_admin',
+            targetType: 'user',
+            targetId,
+            ipAddress: ip,
+            details: JSON.stringify({ name: removeTarget.name, email: removeTarget.email, previousRole: removeTarget.adminRole }),
+          }
+        })
+        return NextResponse.json({ success: true })
+      }
+
+      case 'reset_admin_password': {
+        if (!canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
+          return NextResponse.json({ error: 'Only Super Admin can reset admin passwords' }, { status: 403 })
+        }
+        const resetTarget = await db.user.findUnique({ where: { id: targetId } })
+        if (!resetTarget || !resetTarget.isAdmin) {
+          return NextResponse.json({ error: 'Admin account not found' }, { status: 404 })
+        }
+        // Cannot reset Super Admin password this way
+        if (resetTarget.isSuperAdmin) {
+          return NextResponse.json({ error: 'Super Admin password must be reset via Forgot Password flow' }, { status: 403 })
+        }
+        const newPassword = updates?.password
+        if (!newPassword) {
+          return NextResponse.json({ error: 'New password is required' }, { status: 400 })
+        }
+        const { validatePasswordStrength } = await import('@/lib/admin-auth')
+        const validation = validatePasswordStrength(newPassword)
+        if (!validation.valid) {
+          return NextResponse.json({ error: validation.errors.join('. ') }, { status: 400 })
+        }
+        const newHash = await hashPassword(newPassword)
+        await db.user.update({
+          where: { id: targetId },
+          data: {
+            passwordHash: newHash,
+            mustChangePassword: true,
+          }
+        })
+        // Revoke all sessions to force re-login
+        await db.adminSession.updateMany({
+          where: { userId: targetId, isRevoked: false },
+          data: { isRevoked: true },
+        })
+        await db.auditLog.create({
+          data: {
+            actorId: admin.userId,
+            action: 'reset_admin_password',
+            targetType: 'user',
+            targetId,
+            ipAddress: ip,
+            details: JSON.stringify({ name: resetTarget.name, email: resetTarget.email }),
+          }
+        })
+        return NextResponse.json({ success: true })
+      }
+
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
     }

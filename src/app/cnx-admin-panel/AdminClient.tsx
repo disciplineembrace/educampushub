@@ -7,7 +7,8 @@ import {
   RefreshCw, Trash2, Ban, BadgeCheck, Star, Eye, TrendingUp,
   Shield, ChevronRight, Clock, MoreVertical, CheckCircle2, XCircle, X,
   Crown, UserCog, HeadphonesIcon, Search, CreditCard, IndianRupee, Image as ImageIcon,
-  Pencil, PackageCheck, PackageX, Zap, FileDigit, UserX, ListX, Save, EyeOff
+  Pencil, PackageCheck, PackageX, Zap, FileDigit, UserX, ListX, Save, EyeOff,
+  Fingerprint, UserPlus, KeyRound, Loader2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -36,13 +37,15 @@ import AdminLogin from './AdminLogin'
 
 // ─── Types ────────────────────────────────────────────────────────
 
-type AdminTab = 'overview' | 'users' | 'listings' | 'reports' | 'audit' | 'payments'
+type AdminTab = 'overview' | 'users' | 'listings' | 'reports' | 'audit' | 'payments' | 'admins'
 
 interface AdminInfo {
   id: string
   name: string
   email: string
   role: string
+  isSuperAdmin?: boolean
+  twoFactorVerified?: boolean
 }
 
 interface Stats {
@@ -192,7 +195,24 @@ interface AuditLogItem {
   details: string | null
   ipAddress: string | null
   createdAt: string
-  actor: { name: string; email: string }
+  actor: { name: string; email: string; adminRole?: string | null; isSuperAdmin?: boolean }
+}
+
+interface AdminAccountItem {
+  id: string
+  name: string
+  email: string
+  phone: string | null
+  adminRole: string | null
+  isSuperAdmin: boolean
+  twoFactorEnabled: boolean
+  isVerified: boolean
+  isBanned: boolean
+  mustChangePassword: boolean
+  createdAt: string
+  lastLogin: string | null
+  lastLoginIp: string | null
+  _count: { auditLogs: number; adminSessions: number }
 }
 
 interface PaymentItem {
@@ -309,6 +329,14 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   const [upiConfig, setUpiConfig] = useState<string>('')
   const [upiSaving, setUpiSaving] = useState(false)
 
+  // Admin accounts state (Super Admin only)
+  const [adminAccounts, setAdminAccounts] = useState<AdminAccountItem[]>([])
+  const [adminAccountsLoading, setAdminAccountsLoading] = useState(false)
+  const [showCreateAdminModal, setShowCreateAdminModal] = useState(false)
+  const [createAdminForm, setCreateAdminForm] = useState({ name: '', email: '', phone: '', password: '', role: 'support_admin' })
+  const [createAdminLoading, setCreateAdminLoading] = useState(false)
+  const isSuperAdmin = admin?.isSuperAdmin || admin?.role === 'super_admin'
+
   // Modal states
   const [showListingModal, setShowListingModal] = useState(false)
   const [selectedListing, setSelectedListing] = useState<ListingDetail | null>(null)
@@ -367,6 +395,20 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
     }
   }, [])
 
+  const fetchAdminAccounts = useCallback(async () => {
+    setAdminAccountsLoading(true)
+    try {
+      const res = await fetch('/api/cnx-admin?type=admin-accounts')
+      if (res.ok) { const d = await res.json(); setAdminAccounts(d.admins || []) }
+      else { setAdminAccounts([]) }
+    } catch (err) {
+      console.error('Admin accounts fetch error:', err)
+      setAdminAccounts([])
+    } finally {
+      setAdminAccountsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (admin) fetchData()
   }, [admin, fetchData])
@@ -388,6 +430,12 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
       }).catch(() => {})
     }
   }, [admin, activeTab, fetchPayments])
+
+  useEffect(() => {
+    if (admin && activeTab === 'admins' && isSuperAdmin) {
+      fetchAdminAccounts()
+    }
+  }, [admin, activeTab, isSuperAdmin, fetchAdminAccounts])
 
   // Admin actions
   const adminAction = async (action: string, targetId: string, details?: string) => {
@@ -666,6 +714,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   // Sidebar navigation items
   const sidebarItems: { id: AdminTab; label: string; icon: React.ElementType; count?: number }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    ...(isSuperAdmin ? [{ id: 'admins' as AdminTab, label: 'Admins', icon: UserCog, count: adminAccounts.length }] : []),
     { id: 'users', label: 'Users', icon: Users, count: stats?.totalUsers },
     { id: 'listings', label: 'Listings', icon: BookOpen, count: stats?.totalListings },
     { id: 'reports', label: 'Reports', icon: AlertTriangle, count: stats?.unresolvedReports },
@@ -778,7 +827,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
           </Button>
 
           <h2 className="text-sm font-semibold text-slate-200 capitalize">
-            {activeTab === 'audit' ? 'Audit Logs' : activeTab === 'payments' ? 'Payments' : activeTab}
+            {activeTab === 'audit' ? 'Audit Logs' : activeTab === 'payments' ? 'Payments' : activeTab === 'admins' ? 'Admin Management' : activeTab}
           </h2>
 
           <div className="flex-1" />
@@ -832,6 +881,14 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
               )}
               {activeTab === 'payments' && (
                 <PaymentsTab payments={filteredPayments} loading={loading} onAction={adminAction} revenueData={revenueData} />
+              )}
+              {activeTab === 'admins' && isSuperAdmin && (
+                <AdminsTab
+                  admins={adminAccounts}
+                  loading={adminAccountsLoading}
+                  currentAdminId={admin.id}
+                  onRefresh={fetchAdminAccounts}
+                />
               )}
             </motion.div>
           </AnimatePresence>
@@ -2916,6 +2973,406 @@ function LoadingSkeleton() {
           <div className="h-10 bg-slate-800 rounded" />
         </Card>
       ))}
+    </div>
+  )
+}
+
+// ─── Admins Tab (Super Admin Only) ──────────────────────────────────
+
+function AdminsTab({ admins, loading, currentAdminId, onRefresh }: {
+  admins: AdminAccountItem[]
+  loading: boolean
+  currentAdminId: string
+  onRefresh: () => void
+}) {
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createForm, setCreateForm] = useState({ name: '', email: '', phone: '', password: '', role: 'support_admin' })
+  const [creating, setCreating] = useState(false)
+  const [resetPasswordId, setResetPasswordId] = useState<string | null>(null)
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetting, setResetting] = useState(false)
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setCreating(true)
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_admin', targetId: 'new', updates: createForm }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Admin account created successfully')
+        setShowCreateModal(false)
+        setCreateForm({ name: '', email: '', phone: '', password: '', role: 'support_admin' })
+        onRefresh()
+      } else {
+        toast.error(data.error || 'Failed to create admin')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleRemoveAdmin = async (adminId: string, adminName: string) => {
+    if (!confirm(`Remove admin access from ${adminName}? They will be demoted to a regular user.`)) return
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove_admin', targetId: adminId }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Admin access removed from ${adminName}`)
+        onRefresh()
+      } else {
+        toast.error(data.error || 'Failed to remove admin')
+      }
+    } catch {
+      toast.error('Network error')
+    }
+  }
+
+  const handleUpdateRole = async (adminId: string, newRole: string) => {
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_admin_role', targetId: adminId, updates: { role: newRole } }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Role updated successfully')
+        onRefresh()
+      } else {
+        toast.error(data.error || 'Failed to update role')
+      }
+    } catch {
+      toast.error('Network error')
+    }
+  }
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resetPasswordId) return
+    setResetting(true)
+    try {
+      const res = await fetch('/api/cnx-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset_admin_password', targetId: resetPasswordId, updates: { password: resetPassword } }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Password reset successfully. Admin must change it on next login.')
+        setResetPasswordId(null)
+        setResetPassword('')
+        onRefresh()
+      } else {
+        toast.error(data.error || 'Failed to reset password')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setResetting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <div className="h-8 w-48 bg-slate-800 rounded-lg animate-pulse" />
+          <div className="h-9 w-36 bg-slate-800 rounded-xl animate-pulse" />
+        </div>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-24 bg-slate-900/50 rounded-xl animate-pulse" />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+            <Crown className="w-5 h-5 text-amber-500" />
+            Admin Account Management
+          </h3>
+          <p className="text-sm text-slate-400 mt-1">
+            Create, edit, and manage admin accounts. Only Super Admin can access this section.
+          </p>
+        </div>
+        <Button
+          onClick={() => setShowCreateModal(true)}
+          className="gap-2 rounded-xl bg-[#FF6600] hover:bg-[#FF8533] text-white"
+        >
+          <UserPlus className="w-4 h-4" /> Create Admin
+        </Button>
+      </div>
+
+      {/* Admin cards */}
+      <div className="space-y-3">
+        {admins.map(admin => (
+          <Card key={admin.id} className="p-4 bg-slate-900/50 border-slate-800 hover:border-slate-700 transition-colors">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              {/* Avatar */}
+              <div className={`w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0 ${
+                admin.isSuperAdmin
+                  ? 'bg-gradient-to-br from-amber-500 to-orange-600'
+                  : 'bg-gradient-to-br from-slate-600 to-slate-700'
+              }`}>
+                {admin.isSuperAdmin ? <Crown className="w-5 h-5" /> : admin.name.charAt(0)}
+              </div>
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-medium text-slate-200 truncate">{admin.name}</p>
+                  <RoleBadge role={admin.adminRole || 'support_admin'} />
+                  {admin.twoFactorEnabled && (
+                    <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 border text-[10px] gap-1 rounded-full px-2 py-0.5">
+                      <Fingerprint className="w-3 h-3" /> 2FA
+                    </Badge>
+                  )}
+                  {admin.isSuperAdmin && (
+                    <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-[10px] gap-1 rounded-full px-2 py-0.5">
+                      <Shield className="w-3 h-3" /> Protected
+                    </Badge>
+                  )}
+                  {admin.mustChangePassword && (
+                    <Badge className="bg-red-500/15 text-red-400 border-red-500/30 border text-[10px] gap-1 rounded-full px-2 py-0.5">
+                      <KeyRound className="w-3 h-3" /> Must Change PW
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 truncate">{admin.email}</p>
+                <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                  {admin.phone && <span>{admin.phone}</span>}
+                  {admin.lastLogin && (
+                    <span>Last login: {new Date(admin.lastLogin).toLocaleDateString()}</span>
+                  )}
+                  {admin.lastLoginIp && <span>IP: {admin.lastLoginIp}</span>}
+                  <span>Actions: {admin._count.auditLogs}</span>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Role selector (not for Super Admin) */}
+                {!admin.isSuperAdmin && admin.id !== currentAdminId && (
+                  <Select
+                    value={admin.adminRole || 'support_admin'}
+                    onValueChange={(role) => handleUpdateRole(admin.id, role)}
+                  >
+                    <SelectTrigger className="w-32 h-8 text-xs bg-slate-800 border-slate-700 text-slate-200">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700">
+                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                      <SelectItem value="moderator">Moderator</SelectItem>
+                      <SelectItem value="support_admin">Support</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Reset password */}
+                {!admin.isSuperAdmin && admin.id !== currentAdminId && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { setResetPasswordId(admin.id); setResetPassword('') }}
+                    className="text-slate-400 hover:text-amber-400 gap-1 rounded-lg"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+
+                {/* Remove admin */}
+                {!admin.isSuperAdmin && admin.id !== currentAdminId && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="ghost" className="text-slate-400 hover:text-red-400 gap-1 rounded-lg">
+                        <UserX className="w-3.5 h-3.5" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="bg-slate-900 border-slate-700">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="text-slate-100">Remove Admin Access</AlertDialogTitle>
+                        <AlertDialogDescription className="text-slate-400">
+                          Remove admin access from <strong className="text-slate-200">{admin.name}</strong>? They will be demoted to a regular user. All their admin sessions will be revoked.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="bg-slate-800 border-slate-700 text-slate-200">Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => handleRemoveAdmin(admin.id, admin.name)}
+                          className="bg-red-600 hover:bg-red-700 text-white"
+                        >
+                          Remove Admin
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+              </div>
+            </div>
+          </Card>
+        ))}
+
+        {admins.length === 0 && (
+          <div className="text-center py-8 text-slate-500">
+            <UserCog className="w-10 h-10 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">No admin accounts found</p>
+          </div>
+        )}
+      </div>
+
+      {/* Create Admin Modal */}
+      <AnimatePresence>
+        {showCreateModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={() => setShowCreateModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6"
+              onClick={e => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-[#FF6600]" /> Create Admin Account
+              </h3>
+
+              <form onSubmit={handleCreateAdmin} className="space-y-4">
+                <div>
+                  <Label className="text-slate-400 text-xs mb-1 block">Full Name</Label>
+                  <Input
+                    value={createForm.name}
+                    onChange={e => setCreateForm({ ...createForm, name: e.target.value })}
+                    required
+                    className="bg-slate-800 border-slate-700 text-slate-200"
+                    placeholder="Admin name"
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-400 text-xs mb-1 block">Email</Label>
+                  <Input
+                    type="email"
+                    value={createForm.email}
+                    onChange={e => setCreateForm({ ...createForm, email: e.target.value })}
+                    required
+                    className="bg-slate-800 border-slate-700 text-slate-200"
+                    placeholder="admin@example.com"
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-400 text-xs mb-1 block">Phone (optional)</Label>
+                  <Input
+                    value={createForm.phone}
+                    onChange={e => setCreateForm({ ...createForm, phone: e.target.value })}
+                    className="bg-slate-800 border-slate-700 text-slate-200"
+                    placeholder="99XXXXXXXX"
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-400 text-xs mb-1 block">Password</Label>
+                  <Input
+                    type="password"
+                    value={createForm.password}
+                    onChange={e => setCreateForm({ ...createForm, password: e.target.value })}
+                    required
+                    className="bg-slate-800 border-slate-700 text-slate-200"
+                    placeholder="Strong password"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Min 8 chars, uppercase, lowercase, number, special char</p>
+                </div>
+                <div>
+                  <Label className="text-slate-400 text-xs mb-1 block">Role</Label>
+                  <Select
+                    value={createForm.role}
+                    onValueChange={(role) => setCreateForm({ ...createForm, role })}
+                  >
+                    <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700">
+                      <SelectItem value="moderator">Moderator</SelectItem>
+                      <SelectItem value="support_admin">Support Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)} className="flex-1 text-slate-400">
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={creating} className="flex-1 bg-[#FF6600] hover:bg-[#FF8533] text-white">
+                    {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Admin'}
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Reset Password Modal */}
+      <AnimatePresence>
+        {resetPasswordId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={() => { setResetPasswordId(null); setResetPassword('') }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl p-6"
+              onClick={e => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-amber-500" /> Reset Admin Password
+              </h3>
+              <p className="text-xs text-slate-400 mb-4">
+                The admin must change their password on next login.
+              </p>
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <Input
+                  type="password"
+                  value={resetPassword}
+                  onChange={e => setResetPassword(e.target.value)}
+                  required
+                  className="bg-slate-800 border-slate-700 text-slate-200"
+                  placeholder="New password"
+                />
+                <div className="flex gap-3">
+                  <Button type="button" variant="ghost" onClick={() => { setResetPasswordId(null); setResetPassword('') }} className="flex-1 text-slate-400">
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={resetting} className="flex-1 bg-amber-600 hover:bg-amber-500 text-white">
+                    {resetting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reset Password'}
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

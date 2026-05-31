@@ -19,7 +19,7 @@ export default async function AdminPanelPage() {
   // Fetch admin user details
   const user = await db.user.findUnique({
     where: { id: admin.userId },
-    select: { id: true, name: true, email: true, adminRole: true }
+    select: { id: true, name: true, email: true, adminRole: true, isSuperAdmin: true }
   })
 
   if (!user) {
@@ -34,6 +34,8 @@ export default async function AdminPanelPage() {
         name: user.name,
         email: user.email,
         role: user.adminRole || admin.role,
+        isSuperAdmin: user.isSuperAdmin || admin.isSuperAdmin,
+        twoFactorVerified: admin.twoFactorVerified,
       }}
     />
   )

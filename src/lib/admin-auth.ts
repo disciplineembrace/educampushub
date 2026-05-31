@@ -17,6 +17,8 @@ export interface AdminPayload {
   userId: string
   email: string
   role: AdminRole
+  isSuperAdmin: boolean
+  twoFactorVerified: boolean
   iat: number
   exp: number
 }
@@ -76,12 +78,20 @@ function verifySignedToken(token: string): AdminPayload | null {
 
 // ─── Admin Session Management ───
 
-export async function createAdminSession(userId: string, email: string, role: AdminRole, ipAddress?: string, userAgent?: string) {
+export async function createAdminSession(
+  userId: string,
+  email: string,
+  role: AdminRole,
+  isSuperAdmin: boolean,
+  twoFactorVerified: boolean,
+  ipAddress?: string,
+  userAgent?: string
+) {
   try {
     const iat = Math.floor(Date.now() / 1000)
     const exp = iat + (4 * 60 * 60) // 4 hours
 
-    const payload: AdminPayload = { userId, email, role, iat, exp }
+    const payload: AdminPayload = { userId, email, role, isSuperAdmin, twoFactorVerified, iat, exp }
     const token = createSignedToken(payload)
 
     await db.adminSession.create({
@@ -112,6 +122,11 @@ export async function verifyAdminToken(token: string): Promise<AdminPayload | nu
     })
 
     if (!session || session.isRevoked || session.expiresAt < new Date() || session.user.isBanned) {
+      return null
+    }
+
+    // Super Admin must have completed 2FA
+    if (payload.isSuperAdmin && !payload.twoFactorVerified) {
       return null
     }
 
@@ -166,4 +181,49 @@ export function hasPermission(role: AdminRole, permission: string): boolean {
   if (!perms) return false
   if (perms.includes('all')) return true
   return perms.includes(permission)
+}
+
+// ─── Super Admin Protection ───
+
+/**
+ * Check if a user is the immutable Super Admin.
+ * The Super Admin account (identified by isSuperAdmin flag) has special protections.
+ */
+export function isSuperAdminAccount(user: { isSuperAdmin?: boolean; adminRole?: string | null }): boolean {
+  return user.isSuperAdmin === true || user.adminRole === 'super_admin'
+}
+
+/**
+ * Check if a Super Admin account can be modified by the given actor.
+ * Super Admin accounts CANNOT be:
+ * - Deleted by anyone
+ * - Banned by anyone
+ * - Demoted by anyone except another Super Admin
+ */
+export function canModifySuperAdmin(actorRole: AdminRole, actorIsSuperAdmin: boolean, targetIsSuperAdmin: boolean, action: string): { allowed: boolean; reason?: string } {
+  // Super Admin accounts cannot be targeted for destructive actions
+  if (targetIsSuperAdmin) {
+    // Only Super Admin can modify other Super Admin accounts
+    if (!actorIsSuperAdmin) {
+      return { allowed: false, reason: 'Super Admin accounts cannot be modified by other roles' }
+    }
+
+    // Even Super Admin cannot delete the primary Super Admin account
+    if (action === 'delete' || action === 'delete_user') {
+      return { allowed: false, reason: 'Super Admin account cannot be deleted' }
+    }
+
+    // Super Admin can ban/unban, edit, but NOT delete
+    return { allowed: true }
+  }
+
+  return { allowed: true }
+}
+
+/**
+ * Check if the actor can create or remove admin accounts.
+ * Only Super Admin can create, edit, or remove admin accounts.
+ */
+export function canManageAdmins(actorRole: AdminRole, actorIsSuperAdmin: boolean): boolean {
+  return actorIsSuperAdmin || actorRole === 'super_admin'
 }

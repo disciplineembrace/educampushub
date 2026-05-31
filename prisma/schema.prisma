@@ -23,6 +23,8 @@ model User {
   adminRole           String?         // "super_admin" | "moderator" | "support_admin"
   passwordHash        String?         // bcrypt hashed password for admin accounts
   mustChangePassword  Boolean         @default(false) // force password change on first login
+  twoFactorEnabled    Boolean         @default(false) // 2FA enabled (auto-on for super_admin)
+  isSuperAdmin        Boolean         @default(false) // immutable flag: true only for the primary Super Admin
   isBanned            Boolean         @default(false)
   rating              Float           @default(0)
   totalSales          Int             @default(0)
