@@ -132,7 +132,7 @@ function MobileBottomNav({ navItems }: { navItems: { icon: React.ElementType; la
 }
 
 export default function EduCampusHub() {
-  const { currentPage, darkMode } = useAppStore()
+  const { currentPage, darkMode, setCurrentUser, setCurrentPage } = useAppStore()
   const { t } = useTranslation()
 
   const MOBILE_NAV_ITEMS: { icon: React.ElementType; label: string; page: PageType; isCenter?: boolean }[] = [
@@ -146,6 +146,36 @@ export default function EduCampusHub() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode)
   }, [darkMode])
+
+  // Handle Google OAuth callback
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const params = new URLSearchParams(window.location.search)
+    const googleLogin = params.get('google_login')
+    const googleError = params.get('google_error')
+    const userData = params.get('user_data')
+
+    if (googleLogin === 'success' && userData) {
+      try {
+        // base64url decode: replace chars and use atob
+        const base64 = userData.replace(/-/g, '+').replace(/_/g, '/')
+        const padded = base64 + '='.repeat((4 - base64.length % 4) % 4)
+        const decoded = JSON.parse(decodeURIComponent(escape(atob(padded))))
+        setCurrentUser(decoded)
+        setCurrentPage('home')
+      } catch (e) {
+        console.error('Failed to parse Google login user data:', e)
+      }
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname)
+    } else if (googleError) {
+      // Show error and redirect to login
+      setCurrentPage('login')
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [setCurrentUser, setCurrentPage])
 
   const PageComponent = PAGE_COMPONENTS[currentPage] || HomePage
 
