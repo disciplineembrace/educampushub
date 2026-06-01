@@ -616,4 +616,26 @@ export const translations: Record<string, unknown> = {
     featured: 'फीचर्ड', savePercent: '{savings}% बचत',
     classPrefix: 'कक्षा', semesterPrefix: 'सेमेस्टर',
   },
+
+  // ===================== HERO SECTION =====================
+  hero: {
+    heading: {
+      line1: 'पुरानी किताबें खरीदें और बेचें',
+      line2: 'सीधे छात्रों से',
+    },
+    description: 'भारत का सबसे विश्वसनीय छात्र मार्केटप्लेस किताबों, नोट्स और पढ़ाई की सामग्री के लिए। पाठ्यपुस्तकों पर 70% तक बचत करें बिना किसी दलाल के।',
+    startSelling: 'बेचना शुरू करें',
+    exploreBooks: 'किताबें खोजें',
+    followInstagram: 'डील और स्टडी टिप्स के लिए @educampushubofficial को फ़ॉलो करें',
+  },
+
+  // ===================== APP DOWNLOAD SECTION =====================
+  appDownload: {
+    comingSoon: 'जल्द ही Play Store पर',
+    heading: 'EduCampusHub अपने फ़ोन पर पाएं',
+    description: 'चलते-फिरते खरीदें, बेचें। जब कोई आपको चाहिए वाली किताब लिस्ट करे तो तुरंत नोटिफिकेशन पाएं। सबसे अच्छी डील पहले पाएं!',
+    onTheList: 'आप लिस्ट में हैं! हम आपको सूचित करेंगे।',
+    enterEmail: 'अपना ईमेल दर्ज करें',
+    notifyMe: 'मुझे सूचित करें',
+  },
 }

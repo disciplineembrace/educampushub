@@ -1,14 +1,22 @@
 import { NextResponse } from 'next/server'
 import { sendOTPEmail, verifyBrevoConnection } from '@/lib/brevo-email'
 
-export async function GET() {
-  const resendKey = process.env.RESEND_API_KEY || ''
+// Admin-only test endpoint - requires secret key in header
+export async function GET(request: Request) {
+  // Protect endpoint: require admin secret key
+  const authHeader = request.headers.get('x-admin-secret')
+  const adminSecret = process.env.ADMIN_SECRET || 'educampushub-admin-2024'
+
+  if (authHeader !== adminSecret) {
+    return NextResponse.json({ error: 'Unauthorized. This endpoint is for admin use only.' }, { status: 401 })
+  }
+
   const brevoKey = process.env.BREVO_API_KEY || ''
 
-  if (!resendKey && !brevoKey) {
+  if (!brevoKey) {
     return NextResponse.json({
       error: 'No email service configured',
-      hint: 'Set RESEND_API_KEY (recommended) or BREVO_API_KEY in environment variables',
+      hint: 'Set BREVO_API_KEY in environment variables',
     })
   }
 

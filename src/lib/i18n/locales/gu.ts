@@ -871,4 +871,26 @@ export const translations: Record<string, unknown> = {
     classPrefix: 'ધોરણ',
     semesterPrefix: 'સેમેસ્ટર',
   },
+
+  // ===================== HERO SECTION =====================
+  hero: {
+    heading: {
+      line1: 'જૂના પુસ્તકો ખરીદો અને વેચો',
+      line2: 'સીધા વિદ્યાર્થીઓ સાથે',
+    },
+    description: 'ભારતનું સૌથી વિશ્વસનીય વિદ્યાર્થી માર્કેટપ્લેસ પુસ્તકો, નોંધ અને અભ્યાસ સામગ્રી માટે. પાઠ્યપુસ્તકો પર 70% સુધીની બચત કોઈ મધ્યસ્થ વિના.',
+    startSelling: 'વેચવાનું શરૂ કરો',
+    exploreBooks: 'પુસ્તકો શોધો',
+    followInstagram: 'ડીલ અને અભ્યાસ ટિપ્સ માટે @educampushubofficial ને ફોલો કરો',
+  },
+
+  // ===================== APP DOWNLOAD SECTION =====================
+  appDownload: {
+    comingSoon: 'ટૂંક સમયમાં Play Store પર',
+    heading: 'EduCampusHub તમારા ફોન પર મેળવો',
+    description: 'ચાલતા-ફરતા ખરીદો, વેચો. જ્યારે કોઈ તમને જોઈતી પુસ્તક લિસ્ટ કરે ત્યારે તરત નોટિફિકેશન મેળવો. શ્રેષ્ઠ ડીલ પહેલા મેળવો!',
+    onTheList: 'તમે લિસ્ટમાં છો! અમે તમને જાણ કરીશું.',
+    enterEmail: 'તમારો ઇમેઇલ દાખલ કરો',
+    notifyMe: 'મને જાણ કરો',
+  },
 }

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Sparkles, ArrowRight, Rocket, BookOpen, Users, Library, GraduationCap, Instagram } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
+import { useTranslation } from '@/lib/i18n/TranslationContext'
 import { Button } from '@/components/ui/button'
 
 interface PlatformStats {
@@ -14,6 +15,7 @@ interface PlatformStats {
 
 export default function HeroSection() {
   const { setCurrentPage } = useAppStore()
+  const { t } = useTranslation()
   const [stats, setStats] = useState<PlatformStats | null>(null)
 
   useEffect(() => {
@@ -97,9 +99,9 @@ export default function HeroSection() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.1, ease: 'easeOut' }}
           >
-            Buy & Sell Old Books{' '}
+            {t('hero.heading.line1')}{' '}
             <br className="hidden sm:block" />
-            <span className="gradient-text">Directly With Students</span>
+            <span className="gradient-text">{t('hero.heading.line2')}</span>
           </motion.h1>
 
           <motion.p
@@ -108,7 +110,7 @@ export default function HeroSection() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.2, ease: 'easeOut' }}
           >
-            India&apos;s most trusted student marketplace for books, notes, and study essentials. Save up to 70% on textbooks with zero middleman.
+            {t('hero.description')}
           </motion.p>
 
           <motion.div
@@ -122,7 +124,7 @@ export default function HeroSection() {
               className="btn-gradient text-white border-0 h-12 px-8 text-base font-semibold rounded-xl w-full sm:w-auto"
             >
               <span className="flex items-center gap-2">
-                Start Selling
+                {t('hero.startSelling')}
                 <ArrowRight className="w-4 h-4" />
               </span>
             </Button>
@@ -132,7 +134,7 @@ export default function HeroSection() {
               className="h-12 px-8 text-base font-semibold rounded-xl border-2 border-brand/30 text-brand hover:bg-brand/5 w-full sm:w-auto"
             >
               <BookOpen className="w-4 h-4 mr-2" />
-              Explore Books
+              {t('hero.exploreBooks')}
             </Button>
           </motion.div>
 
@@ -150,7 +152,7 @@ export default function HeroSection() {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-orange-500/10 border border-purple-500/20 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-purple-500/40 transition-all"
             >
               <Instagram className="w-4 h-4 text-pink-500" />
-              Follow @educampushubofficial for deals & study tips
+              {t('hero.followInstagram')}
             </a>
           </motion.div>
 

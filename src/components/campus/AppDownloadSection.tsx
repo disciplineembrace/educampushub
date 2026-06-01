@@ -3,10 +3,12 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Smartphone, Bell, ArrowRight, Sparkles } from 'lucide-react'
+import { useTranslation } from '@/lib/i18n/TranslationContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 export default function AppDownloadSection() {
+  const { t } = useTranslation()
   const [email, setEmail] = useState('')
   const [subscribed, setSubscribed] = useState(false)
 
@@ -31,13 +33,13 @@ export default function AppDownloadSection() {
               transition={{ duration: 0.5 }}
             >
               <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-white/10 text-sm font-medium mb-6 border border-white/20">
-                <Smartphone className="w-4 h-4" /> Coming Soon on Play Store
+                <Smartphone className="w-4 h-4" /> {t('appDownload.comingSoon')}
               </div>
               <h2 className="text-3xl sm:text-4xl font-bold mb-4 font-heading text-white">
-                Get EduCampusHub on Your Phone
+                {t('appDownload.heading')}
               </h2>
               <p className="text-white/70 max-w-lg mb-8 leading-relaxed">
-                Browse, buy and sell on the go. Get notified instantly when someone lists a book you need. Be the first to grab the best deals!
+                {t('appDownload.description')}
               </p>
 
               {subscribed ? (
@@ -46,20 +48,20 @@ export default function AppDownloadSection() {
                   animate={{ opacity: 1, scale: 1 }}
                   className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                 >
-                  <Bell className="w-5 h-5" /> You&apos;re on the list! We&apos;ll notify you.
+                  <Bell className="w-5 h-5" /> {t('appDownload.onTheList')}
                 </motion.div>
               ) : (
                 <form onSubmit={handleSubscribe} className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto lg:mx-0">
                   <Input
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    placeholder="Enter your email"
+                    placeholder={t('appDownload.enterEmail')}
                     type="email"
                     required
                     className="h-12 bg-white/10 border-white/20 text-white placeholder:text-white/40 focus-visible:ring-brand"
                   />
                   <Button type="submit" className="h-12 bg-white text-brand hover:bg-white/90 px-6 font-semibold whitespace-nowrap rounded-xl">
-                    Notify Me <ArrowRight className="w-4 h-4 ml-1" />
+                    {t('appDownload.notifyMe')} <ArrowRight className="w-4 h-4 ml-1" />
                   </Button>
                 </form>
               )}

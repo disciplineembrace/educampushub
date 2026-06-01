@@ -930,4 +930,26 @@ export const translations: Record<string, unknown> = {
     classPrefix: 'Class',
     semesterPrefix: 'Semester',
   },
+
+  // ===================== HERO SECTION =====================
+  hero: {
+    heading: {
+      line1: 'Buy & Sell Old Books',
+      line2: 'Directly With Students',
+    },
+    description: "India's most trusted student marketplace for books, notes, and study essentials. Save up to 70% on textbooks with zero middleman.",
+    startSelling: 'Start Selling',
+    exploreBooks: 'Explore Books',
+    followInstagram: 'Follow @educampushubofficial for deals & study tips',
+  },
+
+  // ===================== APP DOWNLOAD SECTION =====================
+  appDownload: {
+    comingSoon: 'Coming Soon on Play Store',
+    heading: 'Get EduCampusHub on Your Phone',
+    description: 'Browse, buy and sell on the go. Get notified instantly when someone lists a book you need. Be the first to grab the best deals!',
+    onTheList: "You're on the list! We'll notify you.",
+    enterEmail: 'Enter your email',
+    notifyMe: 'Notify Me',
+  },
 }
