@@ -336,3 +336,32 @@ Stage Summary:
   - User Forgot Password: ready (same code pattern)
 - ✅ Test email confirmed delivered via Brevo API
 - Brevo free plan: 300 emails/day
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Check faults, fix loading/data issues, compress size with no data loss
+
+Work Log:
+- Explored full codebase for faults and issues
+- Found critical bug: in-memory reset tokens in forgot-password routes (broken in serverless Vercel)
+- Found unused dependencies adding ~2MB+ to bundle (next-auth, recharts, react-query, resend, nodemailer, jsonwebtoken, imap, mailparser, ws, react-syntax-highlighter)
+- Found dead code: legacy AdminDashboard.tsx, redundant NextAuth route, unused chart.tsx
+- Found dead state variables: upiConfig, upiSaving, forgotMaskedEmail, forgotOtp, otpResendTimer
+- Found large unoptimized images in public/ directory
+- Fixed forgot-password routes with HMAC-signed stateless tokens
+- Removed all unused dependencies from package.json
+- Removed dead code files (AdminDashboard.tsx, NextAuth route, chart.tsx)
+- Cleaned up dead state variables in LoginPage.tsx and AdminClient.tsx
+- Compressed images to WebP format (~80% size reduction on average)
+- Updated all image references in code to use WebP versions
+- Updated next.config.ts optimizePackageImports
+- Deployed to Vercel via GitHub push
+- Verified: admin data loading works, forgot-password flows work, WebP images accessible
+
+Stage Summary:
+- Fixed 2 critical forgot-password routes (serverless-safe tokens)
+- Removed 10+ unused dependencies (significant bundle size reduction)
+- Removed 3 dead code files (839 lines deleted, 76 added)
+- Compressed 5 images (total savings: ~520KB, ~80% reduction)
+- All changes deployed and verified working on production
