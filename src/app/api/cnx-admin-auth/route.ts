@@ -248,8 +248,8 @@ export async function POST(request: Request) {
       response.cookies.set('cnx_admin_session', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/cnx-admin-panel',
+        sameSite: 'lax',
+        path: '/',
         maxAge: 4 * 60 * 60,
       })
 
@@ -353,8 +353,8 @@ export async function POST(request: Request) {
     response.cookies.set('cnx_admin_session', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/cnx-admin-panel',
+      sameSite: 'lax',
+      path: '/',
       maxAge: 4 * 60 * 60,
     })
 

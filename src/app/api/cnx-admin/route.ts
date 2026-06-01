@@ -687,8 +687,8 @@ export async function DELETE() {
   response.cookies.set('cnx_admin_session', '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    path: '/cnx-admin-panel',
+    sameSite: 'lax',
+    path: '/',
     maxAge: 0,
   })
   return response

@@ -890,15 +890,13 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
         className="w-full max-w-sm"
       >
         <Card className="p-8 bg-slate-900/80 border-slate-700/50 backdrop-blur-xl shadow-2xl">
-          {/* Minimal, no branding */}
+          {/* Logo */}
           <div className="flex justify-center mb-6">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center shadow-lg">
-              <Shield className="w-7 h-7 text-slate-300" />
-            </div>
+            <img src="/logo-512x512.png" alt="EduCampusHub" className="w-14 h-14 rounded-2xl object-cover shadow-lg" />
           </div>
 
           <h1 className="text-xl font-semibold text-slate-100 text-center mb-1">
-            Secure Access
+            EduCampusHub Admin
           </h1>
           <p className="text-sm text-slate-400 text-center mb-8">
             Enter your credentials to continue
@@ -960,7 +958,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
             <Button
               type="submit"
               disabled={loading || rateLimited}
-              className="w-full h-11 bg-slate-700 hover:bg-slate-600 text-slate-100 font-medium rounded-xl transition-colors"
+              className="w-full h-11 bg-gradient-to-r from-[#002868] to-[#003d8f] hover:from-[#003d8f] hover:to-[#0052b5] text-white font-medium rounded-xl transition-all"
             >
               {loading ? (
                 <>

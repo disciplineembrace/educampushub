@@ -755,9 +755,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         {/* Logo area */}
         <div className="p-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-accent flex items-center justify-center">
-              <Shield className="w-5 h-5 text-white" />
-            </div>
+            <img src="/logo-512x512.png" alt="EduCampusHub" className="w-9 h-9 rounded-xl object-cover" />
             <div>
               <p className="text-sm font-bold text-slate-100">EduCampusHub</p>
               <p className="text-[10px] text-slate-500 uppercase tracking-wider">Control Panel</p>
