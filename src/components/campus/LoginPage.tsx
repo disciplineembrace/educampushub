@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 type AuthTab = 'login' | 'register'
-type ForgotPasswordStep = 'none' | 'email' | 'otp' | 'reset' | 'success'
+type ForgotPasswordStep = 'none' | 'email' | 'reset' | 'success'
 
 export default function LoginPage() {
   const { setCurrentPage, setCurrentUser } = useAppStore()
@@ -185,7 +185,7 @@ export default function LoginPage() {
 
   // ─── Forgot Password Handlers ───
 
-  const handleSendOTP = async (e: React.FormEvent) => {
+  const handleVerifyEmail = async (e: React.FormEvent) => {
     e.preventDefault()
     setForgotError('')
 
@@ -206,54 +206,16 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send_otp', email: forgotEmail }),
+        body: JSON.stringify({ action: 'verify_email', email: forgotEmail }),
       })
       const data = await res.json()
 
       if (!res.ok) {
-        setForgotError(data.error || t('forgotPassword.error.sendFailed'))
+        setForgotError(data.error || 'Failed to verify email')
         return
       }
 
-      setForgotMaskedEmail(data.maskedEmail || '')
-      setForgotStep('otp')
-      setOtpResendTimer(60)
-    } catch {
-      setForgotError(t('forgotPassword.error.wentWrong'))
-    } finally {
-      setForgotLoading(false)
-    }
-  }
-
-  const handleVerifyOTP = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setForgotError('')
-
-    if (!forgotOtp) {
-      setForgotError(t('forgotPassword.error.otpRequired'))
-      return
-    }
-
-    if (forgotOtp.length !== 6) {
-      setForgotError(t('forgotPassword.error.otpInvalid'))
-      return
-    }
-
-    setForgotLoading(true)
-    try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'verify_otp', email: forgotEmail, otp: forgotOtp }),
-      })
-      const data = await res.json()
-
-      if (!res.ok) {
-        setForgotError(data.error || t('forgotPassword.error.otpInvalid'))
-        return
-      }
-
-      setForgotVerificationToken(data.verificationToken)
+      setForgotVerificationToken(data.resetToken || '')
       setForgotStep('reset')
     } catch {
       setForgotError(t('forgotPassword.error.wentWrong'))
@@ -295,7 +257,7 @@ export default function LoginPage() {
         body: JSON.stringify({
           action: 'reset_password',
           email: forgotEmail,
-          verificationToken: forgotVerificationToken,
+          resetToken: forgotVerificationToken,
           newPassword: forgotNewPassword,
         }),
       })
@@ -314,43 +276,13 @@ export default function LoginPage() {
     }
   }
 
-  const handleResendOTP = async () => {
-    if (otpResendTimer > 0) return
-    setForgotError('')
-    setForgotOtp('')
-
-    setForgotLoading(true)
-    try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send_otp', email: forgotEmail }),
-      })
-      const data = await res.json()
-
-      if (!res.ok) {
-        setForgotError(data.error || t('forgotPassword.error.sendFailed'))
-        return
-      }
-
-      setOtpResendTimer(60)
-    } catch {
-      setForgotError(t('forgotPassword.error.wentWrong'))
-    } finally {
-      setForgotLoading(false)
-    }
-  }
-
   const resetForgotPassword = () => {
     setForgotStep('none')
     setForgotEmail('')
-    setForgotOtp('')
     setForgotNewPassword('')
     setForgotConfirmPassword('')
-    setForgotMaskedEmail('')
     setForgotVerificationToken('')
     setForgotError('')
-    setOtpResendTimer(0)
   }
 
   // ─── Forgot Password UI ───
@@ -370,12 +302,8 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={() => {
-              if (forgotStep === 'otp') {
+              if (forgotStep === 'reset') {
                 setForgotStep('email')
-                setForgotOtp('')
-                setForgotError('')
-              } else if (forgotStep === 'reset') {
-                setForgotStep('otp')
                 setForgotError('')
               } else {
                 resetForgotPassword()
@@ -400,13 +328,11 @@ export default function LoginPage() {
             <div>
               <h2 className="text-xl font-bold text-foreground font-heading">
                 {forgotStep === 'email' && t('forgotPassword.title')}
-                {forgotStep === 'otp' && t('forgotPassword.verifyTitle')}
                 {forgotStep === 'reset' && t('forgotPassword.resetTitle')}
                 {forgotStep === 'success' && t('forgotPassword.successTitle')}
               </h2>
               <p className="text-sm text-muted-foreground">
                 {forgotStep === 'email' && t('forgotPassword.subtitle')}
-                {forgotStep === 'otp' && t('forgotPassword.verifySubtitle', { phone: forgotMaskedEmail })}
                 {forgotStep === 'reset' && t('forgotPassword.resetSubtitle')}
                 {forgotStep === 'success' && t('forgotPassword.successSubtitle')}
               </p>
@@ -417,8 +343,8 @@ export default function LoginPage() {
         {/* Progress Steps */}
         {forgotStep !== 'success' && (
           <div className="flex items-center gap-2">
-            {['email', 'otp', 'reset'].map((step, i) => {
-              const stepOrder = ['email', 'otp', 'reset']
+            {['email', 'reset'].map((step, i) => {
+              const stepOrder = ['email', 'reset']
               const currentIndex = stepOrder.indexOf(forgotStep)
               const stepIndex = i
               const isActive = stepIndex === currentIndex
@@ -436,10 +362,9 @@ export default function LoginPage() {
                     isActive ? 'text-foreground' : 'text-muted-foreground'
                   }`}>
                     {i === 0 && t('forgotPassword.step1')}
-                    {i === 1 && t('forgotPassword.step2')}
-                    {i === 2 && t('forgotPassword.step3')}
+                    {i === 1 && t('forgotPassword.step3')}
                   </span>
-                  {i < 2 && (
+                  {i < 1 && (
                     <div className={`h-0.5 flex-1 rounded-full transition-all ${
                       isCompleted ? 'bg-emerald-500' : 'bg-muted'
                     }`} />
@@ -459,7 +384,7 @@ export default function LoginPage() {
 
         {/* Step 1: Email Input */}
         {forgotStep === 'email' && (
-          <form onSubmit={handleSendOTP} className="space-y-4">
+          <form onSubmit={handleVerifyEmail} className="space-y-4">
             <div>
               <Label className="mb-1.5 block">Email Address</Label>
               <div className="relative">
@@ -473,7 +398,6 @@ export default function LoginPage() {
                   className="h-12 pl-10 rounded-xl"
                 />
               </div>
-              <p className="text-xs text-muted-foreground mt-1.5">{t('forgotPassword.otpHint')}</p>
             </div>
 
             <Button
@@ -488,79 +412,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* Step 2: OTP Verification */}
-        {forgotStep === 'otp' && (
-          <form onSubmit={handleVerifyOTP} className="space-y-4">
-            <div>
-              <Label className="mb-1.5 block">{t('forgotPassword.label.otp')}</Label>
-              <div className="flex gap-2 justify-center">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Input
-                    key={i}
-                    id={`otp-${i}`}
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={1}
-                    value={forgotOtp[i] || ''}
-                    onChange={e => {
-                      const val = e.target.value.replace(/\D/g, '')
-                      if (val) {
-                        const newOtp = forgotOtp.split('')
-                        newOtp[i] = val[0]
-                        setForgotOtp(newOtp.join(''))
-                        // Auto-focus next input
-                        const nextInput = document.getElementById(`otp-${i + 1}`)
-                        if (nextInput) nextInput.focus()
-                      } else {
-                        const newOtp = forgotOtp.split('')
-                        newOtp[i] = ''
-                        setForgotOtp(newOtp.join(''))
-                      }
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Backspace' && !forgotOtp[i]) {
-                        const prevInput = document.getElementById(`otp-${i - 1}`)
-                        if (prevInput) prevInput.focus()
-                      }
-                    }}
-                    className="w-12 h-14 text-center text-xl font-bold rounded-xl"
-                  />
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground mt-2 text-center">{t('forgotPassword.otpHint')}</p>
-            </div>
-
-            {/* Resend OTP */}
-            <div className="text-center">
-              {otpResendTimer > 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {t('forgotPassword.resendIn', { seconds: otpResendTimer })}
-                </p>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleResendOTP}
-                  disabled={forgotLoading}
-                  className="text-sm text-brand hover:underline disabled:opacity-50"
-                >
-                  {t('forgotPassword.resendOtp')}
-                </button>
-              )}
-            </div>
-
-            <Button
-              type="submit"
-              disabled={forgotLoading || forgotOtp.length !== 6}
-              className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
-            >
-              {forgotLoading ? t('forgotPassword.button.verifying') : (
-                <>{t('forgotPassword.button.verifyOtp')} <ArrowRight className="w-4 h-4" /></>
-              )}
-            </Button>
-          </form>
-        )}
-
-        {/* Step 3: Reset Password */}
+        {/* Step 2: Reset Password */}
         {forgotStep === 'reset' && (
           <form onSubmit={handleResetPassword} className="space-y-4">
             <div>

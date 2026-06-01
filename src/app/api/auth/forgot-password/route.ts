@@ -1,16 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getNeonSql } from '@/lib/db'
 import { hashPassword, validatePasswordStrength } from '@/lib/admin-auth'
-import {
-  generateOTP,
-  storeOTP,
-  verifyOTP,
-  checkOTPRateLimit,
-  cleanupExpiredOTPs,
-  maskEmail,
-  getUserByEmail,
-} from '@/lib/otp-utils'
 import { isValidEmail } from '@/lib/api-security'
+import { randomUUID } from 'crypto'
 
 // ─── Rate Limiting for forgot-password endpoint ───
 
@@ -18,21 +10,24 @@ const forgotPasswordAttempts = new Map<string, { count: number; lastAttempt: num
 const MAX_FORGOT_ATTEMPTS = 5
 const FORGOT_LOCKOUT_MS = 15 * 60 * 1000
 
+// In-memory store for reset tokens (short-lived)
+const resetTokens = new Map<string, { email: string; createdAt: number }>()
+const RESET_TOKEN_EXPIRY_MS = 10 * 60 * 1000 // 10 minutes
+
 /**
  * POST /api/auth/forgot-password
  *
- * Email-based OTP flow for password reset:
- * 1. send_otp       — User enters email, OTP sent via Brevo
- * 2. verify_otp     — Verify the OTP code
- * 3. reset_password — Reset password after OTP is verified
+ * Direct password reset (no OTP):
+ * 1. verify_email  — User enters email, get reset token
+ * 2. reset_password — Reset password using reset token
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     const { action } = body
 
-    // ─── Step 1: Send OTP to Email ───
-    if (action === 'send_otp') {
+    // ─── Step 1: Verify Email ───
+    if (action === 'verify_email') {
       const { email } = body
 
       if (!email || typeof email !== 'string') {
@@ -61,148 +56,78 @@ export async function POST(request: Request) {
       }
 
       // Find user by email
-      const user = await getUserByEmail(sanitizedEmail)
+      const sql = getNeonSql()
+      const users = await sql`
+        SELECT id, name, email, "isAdmin", "isBanned"
+        FROM "User" WHERE email = ${sanitizedEmail} LIMIT 1
+      `
+      const user = users?.[0]
 
       if (!user) {
-        // Security: Don't reveal whether email exists
         const current = forgotPasswordAttempts.get(ip) || { count: 0, lastAttempt: 0 }
         forgotPasswordAttempts.set(ip, { count: current.count + 1, lastAttempt: now })
-        return NextResponse.json({
-          success: true,
-          message: 'If this email is registered, an OTP will be sent.',
-          maskedEmail: maskEmail(sanitizedEmail),
-          otpSent: false,
-        })
+        return NextResponse.json({ error: 'No account found with this email address.' }, { status: 400 })
       }
 
       if (user.isBanned) {
         return NextResponse.json({ error: 'This account has been banned. Contact support.' }, { status: 403 })
       }
 
-      // Don't allow OTP for admin accounts via this route — they should use admin forgot password
+      // Admin accounts must use admin panel
       if (user.isAdmin) {
         return NextResponse.json({ error: 'Admin accounts must use the admin panel to reset passwords.' }, { status: 400 })
       }
 
-      // Check OTP rate limit
-      const rateLimit = checkOTPRateLimit(sanitizedEmail)
-      if (!rateLimit.allowed) {
-        return NextResponse.json({ error: rateLimit.reason, retryAfterMs: rateLimit.retryAfterMs }, { status: 429 })
-      }
+      // Generate a reset token
+      const resetToken = randomUUID()
+      resetTokens.set(resetToken, { email: sanitizedEmail, createdAt: Date.now() })
 
-      // Generate and store OTP
-      const otp = generateOTP()
-      await storeOTP({ email: sanitizedEmail, otpCode: otp, purpose: 'forgot_password' })
-
-      // Send OTP via Brevo Email - direct API call
-      let emailSent = false
-
-      const brevoKey = process.env.BREVO_API_KEY
-      if (brevoKey) {
-        try {
-          const brevoResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
-            method: 'POST',
-            headers: {
-              'api-key': brevoKey,
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({
-              sender: { name: 'EduCampusHub', email: 'disciplineembrace@gmail.com' },
-              to: [{ email: sanitizedEmail, name: user.name || sanitizedEmail.split('@')[0] }],
-              subject: `Your EduCampusHub Verification Code: ${otp}`,
-              htmlContent: `<div style="font-family:Arial,sans-serif;text-align:center;padding:40px"><h2 style="color:#002868">EduCampusHub</h2><p style="font-size:15px">Hello ${user.name || ''},</p><p style="font-size:15px">You requested to reset your password. Use the verification code below to proceed:</p><p style="font-size:36px;font-weight:bold;color:#FF6600;letter-spacing:8px">${otp}</p><p style="font-size:13px;color:#666">This code expires in 5 minutes. Do not share it with anyone.</p><p style="font-size:14px;color:#666">If you didn't request this, you can safely ignore this email.</p></div>`,
-              textContent: `EduCampusHub Password Reset Code: ${otp}. Expires in 5 minutes.`,
-            }),
-          })
-          const brevoData = await brevoResponse.json()
-          if (brevoResponse.ok && brevoData.messageId) {
-            emailSent = true
-          }
-        } catch (err) {
-          console.error('[OTP] Brevo API error:', err)
+      // Clean up expired tokens
+      for (const [key, value] of resetTokens) {
+        if (Date.now() - value.createdAt > RESET_TOKEN_EXPIRY_MS) {
+          resetTokens.delete(key)
         }
       }
 
-      // Cleanup expired OTPs
-      cleanupExpiredOTPs().catch(() => {})
-
-      // Mask email for response
-      const maskedEmailAddress = maskEmail(sanitizedEmail)
-
-      // Increment forgot password attempt counter
-      const current = forgotPasswordAttempts.get(ip) || { count: 0, lastAttempt: 0 }
-      forgotPasswordAttempts.set(ip, { count: current.count + 1, lastAttempt: now })
-
-      if (!emailSent) {
-        return NextResponse.json({
-          error: `Failed to send OTP to ${maskedEmailAddress}. Please try again.`,
-          emailError: true,
-        }, { status: 503 })
-      }
-
       return NextResponse.json({
         success: true,
-        message: `OTP sent to ${maskedEmailAddress}`,
-        maskedEmail: maskedEmailAddress,
+        message: 'Email verified. You can now reset your password.',
+        resetToken,
+        userName: user.name,
       })
     }
 
-    // ─── Step 2: Verify OTP ───
-    if (action === 'verify_otp') {
-      const { email, otp } = body
-
-      if (!email || !otp) {
-        return NextResponse.json({ error: 'Email and OTP are required' }, { status: 400 })
-      }
-
-      const sanitizedEmail = email.toLowerCase().trim()
-
-      const result = await verifyOTP(sanitizedEmail, otp, 'forgot_password')
-
-      if (!result.valid) {
-        return NextResponse.json({ error: result.reason }, { status: 400 })
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'OTP verified successfully',
-        verificationToken: result.recordId,
-      })
-    }
-
-    // ─── Step 3: Reset Password ───
+    // ─── Step 2: Reset Password ───
     if (action === 'reset_password') {
-      const { email, verificationToken, newPassword } = body
+      const { email, resetToken, newPassword } = body
 
-      if (!email || !verificationToken || !newPassword) {
+      if (!email || !resetToken || !newPassword) {
         return NextResponse.json({ error: 'All fields are required' }, { status: 400 })
       }
 
       const sanitizedEmail = email.toLowerCase().trim()
 
+      // Verify reset token
+      const tokenData = resetTokens.get(resetToken)
+      if (!tokenData || tokenData.email !== sanitizedEmail) {
+        return NextResponse.json({ error: 'Invalid or expired reset token. Please start over.' }, { status: 400 })
+      }
+
+      // Check token expiry
+      if (Date.now() - tokenData.createdAt > RESET_TOKEN_EXPIRY_MS) {
+        resetTokens.delete(resetToken)
+        return NextResponse.json({ error: 'Reset token expired. Please start over.' }, { status: 400 })
+      }
+
       // Find user by email
-      const user = await getUserByEmail(sanitizedEmail)
+      const sql = getNeonSql()
+      const users = await sql`
+        SELECT id, email, "isAdmin" FROM "User" WHERE email = ${sanitizedEmail} LIMIT 1
+      `
+      const user = users?.[0]
+
       if (!user) {
         return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
-      }
-
-      // Verify the verification token
-      const sql = getNeonSql()
-      const otpRecords = await sql`
-        SELECT id, email, "isVerified", "usedAt"
-        FROM "PasswordResetOTP"
-        WHERE id = ${verificationToken}
-      `
-      const otpRecord = otpRecords?.[0]
-
-      if (!otpRecord || !otpRecord.isVerified || otpRecord.email !== sanitizedEmail) {
-        return NextResponse.json({ error: 'Invalid or expired verification. Please start over.' }, { status: 400 })
-      }
-
-      // Check if OTP record is too old (max 10 minutes after verification)
-      if (otpRecord.usedAt && Date.now() - new Date(otpRecord.usedAt).getTime() > 10 * 60 * 1000) {
-        return NextResponse.json({ error: 'Verification expired. Please start over.' }, { status: 400 })
       }
 
       // Validate password strength
@@ -224,8 +149,8 @@ export async function POST(request: Request) {
         WHERE "userId" = ${user.id} AND "isRevoked" = false
       `
 
-      // Delete the OTP record
-      await sql`DELETE FROM "PasswordResetOTP" WHERE id = ${verificationToken}`
+      // Delete the used reset token
+      resetTokens.delete(resetToken)
 
       return NextResponse.json({
         success: true,

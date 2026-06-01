@@ -16,7 +16,7 @@ interface AdminLoginProps {
   onLogin: (admin: { id: string; name: string; email: string; role: string; isSuperAdmin?: boolean; twoFactorVerified?: boolean; mustChangePassword?: boolean }) => void
 }
 
-type Step = 'login' | 'two_factor' | 'forgot_email' | 'forgot_otp' | 'forgot_reset' | 'force_change_password'
+type Step = 'login' | 'forgot_email' | 'forgot_reset' | 'force_change_password'
 
 export default function AdminLogin({ onLogin }: AdminLoginProps) {
   // ─── Login State ───
@@ -216,8 +216,8 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
     await send2FAOTP(twoFactorAdmin.email)
   }
 
-  // ─── Forgot Password: Send OTP ───
-  const handleSendOTP = async (e: React.FormEvent) => {
+  // ─── Forgot Password: Verify Email ───
+  const handleVerifyEmail = async (e: React.FormEvent) => {
     e.preventDefault()
     setForgotError('')
     setForgotLoading(true)
@@ -226,7 +226,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
       const res = await fetch('/api/cnx-admin-forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send_otp', email: forgotEmail }),
+        body: JSON.stringify({ action: 'verify_email', email: forgotEmail }),
       })
 
       const data = await res.json()
@@ -237,89 +237,16 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
       }
 
       if (!res.ok) {
-        if (data.smsError && data.needsAccountSetup) {
-          setForgotError(`OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`)
-        } else {
-          setForgotError(data.error || 'Failed to send OTP')
-        }
+        setForgotError(data.error || 'Failed to verify email')
         return
       }
 
-      setMaskedEmail(data.maskedEmail || '')
-      setOtpResendTimer(60) // 60-second cooldown
-      setOtpValue('')
-      setOtpError('')
-      setStep('forgot_otp')
+      setVerificationToken(data.resetToken || '')
+      setStep('forgot_reset')
     } catch {
       setForgotError('Connection error. Please try again.')
     } finally {
       setForgotLoading(false)
-    }
-  }
-
-  // ─── Forgot Password: Verify OTP ───
-  const handleVerifyOTP = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setOtpError('')
-
-    if (otpValue.length !== 6) {
-      setOtpError('Please enter the complete 6-digit OTP')
-      return
-    }
-
-    setOtpLoading(true)
-
-    try {
-      const res = await fetch('/api/cnx-admin-forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'verify_otp', email: forgotEmail, otp: otpValue }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        setOtpError(data.error || 'Invalid OTP')
-        return
-      }
-
-      setVerificationToken(data.verificationToken)
-      setStep('forgot_reset')
-    } catch {
-      setOtpError('Connection error. Please try again.')
-    } finally {
-      setOtpLoading(false)
-    }
-  }
-
-  // ─── Forgot Password: Resend OTP ───
-  const handleResendOTP = async () => {
-    if (otpResendTimer > 0) return
-
-    setOtpError('')
-    setOtpValue('')
-
-    try {
-      const res = await fetch('/api/cnx-admin-forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send_otp', email: forgotEmail }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        if (data.smsError && data.needsAccountSetup) {
-          setOtpError(`OTP service is currently unavailable. ${data.setupInstructions || 'Please contact support.'}`)
-        } else {
-          setOtpError(data.error || 'Failed to resend OTP')
-        }
-        return
-      }
-
-      setOtpResendTimer(60)
-    } catch {
-      setOtpError('Connection error. Please try again.')
     }
   }
 
@@ -357,7 +284,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
         body: JSON.stringify({
           action: 'reset_password',
           email: forgotEmail,
-          verificationToken,
+          resetToken: verificationToken,
           newPassword,
         }),
       })
@@ -736,7 +663,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
   // ═══════════════════════════════════════════════════
   // RENDER: Forgot Password Flow
   // ═══════════════════════════════════════════════════
-  if (step === 'forgot_email' || step === 'forgot_otp' || step === 'forgot_reset') {
+  if (step === 'forgot_email' || step === 'forgot_reset') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4">
         <motion.div
@@ -750,7 +677,6 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
             <div className="flex justify-center mb-6">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#002868] to-[#FF6600] flex items-center justify-center shadow-lg">
                 {step === 'forgot_email' && <Mail className="w-7 h-7 text-white" />}
-                {step === 'forgot_otp' && <MessageSquare className="w-7 h-7 text-white" />}
                 {step === 'forgot_reset' && <KeyRound className="w-7 h-7 text-white" />}
               </div>
             </div>
@@ -768,10 +694,10 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
                     Forgot Password?
                   </h1>
                   <p className="text-sm text-slate-400 text-center mb-6">
-                    Enter your admin email to receive an OTP
+                    Enter your admin email to reset your password
                   </p>
 
-                  <form onSubmit={handleSendOTP} className="space-y-4">
+                  <form onSubmit={handleVerifyEmail} className="space-y-4">
                     <div>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -805,103 +731,17 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
                       {forgotLoading ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Sending OTP...
-                        </>
-                      ) : (
-                        'Send OTP'
-                      )}
-                    </Button>
-                  </form>
-                </motion.div>
-              )}
-
-              {/* ─── Step 2: Verify OTP ─── */}
-              {step === 'forgot_otp' && (
-                <motion.div
-                  key="forgot_otp"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                >
-                  <h1 className="text-xl font-semibold text-slate-100 text-center mb-1">
-                    Verify OTP
-                  </h1>
-                  <p className="text-sm text-slate-400 text-center mb-2">
-                    Enter the 6-digit code sent to
-                  </p>
-                  <div className="flex items-center justify-center gap-1.5 mb-6">
-                    <Mail className="w-3.5 h-3.5 text-[#FF6600]" />
-                    <span className="text-sm font-medium text-[#FF6600]">{maskedEmail}</span>
-                  </div>
-
-                  <form onSubmit={handleVerifyOTP} className="space-y-4">
-                    <div className="flex justify-center">
-                      <InputOTP
-                        maxLength={6}
-                        value={otpValue}
-                        onChange={setOtpValue}
-                      >
-                        <InputOTPGroup>
-                          <InputOTPSlot index={0} className="bg-slate-800/60 border-slate-600/50 text-slate-100 text-lg font-mono w-11 h-12" />
-                          <InputOTPSlot index={1} className="bg-slate-800/60 border-slate-600/50 text-slate-100 text-lg font-mono w-11 h-12" />
-                          <InputOTPSlot index={2} className="bg-slate-800/60 border-slate-600/50 text-slate-100 text-lg font-mono w-11 h-12" />
-                        </InputOTPGroup>
-                        <InputOTPSeparator className="mx-1" />
-                        <InputOTPGroup>
-                          <InputOTPSlot index={3} className="bg-slate-800/60 border-slate-600/50 text-slate-100 text-lg font-mono w-11 h-12" />
-                          <InputOTPSlot index={4} className="bg-slate-800/60 border-slate-600/50 text-slate-100 text-lg font-mono w-11 h-12" />
-                          <InputOTPSlot index={5} className="bg-slate-800/60 border-slate-600/50 text-slate-100 text-lg font-mono w-11 h-12" />
-                        </InputOTPGroup>
-                      </InputOTP>
-                    </div>
-
-                    {/* Timer and Resend */}
-                    <div className="text-center">
-                      {otpResendTimer > 0 ? (
-                        <p className="text-xs text-slate-500">
-                          Resend OTP in <span className="text-[#FF6600] font-mono">{otpResendTimer}s</span>
-                        </p>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={handleResendOTP}
-                          className="text-xs text-[#FF6600] hover:text-[#FF8533] flex items-center gap-1 mx-auto"
-                        >
-                          <RotateCcw className="w-3 h-3" /> Resend OTP
-                        </button>
-                      )}
-                    </div>
-
-                    {otpError && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl p-3"
-                      >
-                        <AlertCircle className="w-4 h-4 shrink-0" />
-                        <span>{otpError}</span>
-                      </motion.div>
-                    )}
-
-                    <Button
-                      type="submit"
-                      disabled={otpLoading || otpValue.length !== 6}
-                      className="w-full h-11 bg-[#FF6600] hover:bg-[#FF8533] text-white font-medium rounded-xl transition-colors disabled:opacity-50"
-                    >
-                      {otpLoading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           Verifying...
                         </>
                       ) : (
-                        'Verify OTP'
+                        'Continue'
                       )}
                     </Button>
                   </form>
                 </motion.div>
               )}
 
-              {/* ─── Step 3: Reset Password ─── */}
+              {/* ─── Step 2: Reset Password ─── */}
               {step === 'forgot_reset' && (
                 <motion.div
                   key="forgot_reset"
