@@ -313,7 +313,7 @@ function SessionTimer({ onExpire }: { onExpire: () => void }) {
 
 // ─── Main Component ───────────────────────────────────────────────
 
-export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo }) {
+export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo | null }) {
   const [admin, setAdmin] = useState<AdminInfo | null>(initialAdmin)
   const [activeTab, setActiveTab] = useState<AdminTab>('overview')
   const [stats, setStats] = useState<Stats | null>(null)

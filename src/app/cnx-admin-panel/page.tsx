@@ -1,19 +1,18 @@
 import { getAdminFromCookies } from '@/lib/admin-auth'
 import { db } from '@/lib/db'
 import AdminClient from './AdminClient'
-import NotFoundPage from './NotFound'
 
 export const metadata = {
-  title: 'Page Not Found',
+  title: 'Admin Panel',
   robots: 'noindex,nofollow',
 }
 
 export default async function AdminPanelPage() {
   const admin = await getAdminFromCookies()
 
-  // If not authenticated admin, show 404 (not "access denied"!)
+  // If not authenticated, show login form (AdminClient handles this)
   if (!admin) {
-    return <NotFoundPage />
+    return <AdminClient admin={null} />
   }
 
   // Fetch admin user details
@@ -23,7 +22,7 @@ export default async function AdminPanelPage() {
   })
 
   if (!user) {
-    return <NotFoundPage />
+    return <AdminClient admin={null} />
   }
 
   // If authenticated, show the admin dashboard
