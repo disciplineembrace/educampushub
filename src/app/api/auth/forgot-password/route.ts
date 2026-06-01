@@ -2,17 +2,41 @@ import { NextResponse } from 'next/server'
 import { getNeonSql } from '@/lib/db'
 import { hashPassword, validatePasswordStrength } from '@/lib/admin-auth'
 import { isValidEmail } from '@/lib/api-security'
-import { randomUUID } from 'crypto'
+import { createHmac } from 'crypto'
 
 // ─── Rate Limiting for forgot-password endpoint ───
-
+// NOTE: In-memory rate limiting is imperfect in serverless (resets on cold starts),
+// but it still provides meaningful protection within a single instance's lifetime.
 const forgotPasswordAttempts = new Map<string, { count: number; lastAttempt: number }>()
 const MAX_FORGOT_ATTEMPTS = 5
 const FORGOT_LOCKOUT_MS = 15 * 60 * 1000
 
-// In-memory store for reset tokens (short-lived)
-const resetTokens = new Map<string, { email: string; createdAt: number }>()
+// ─── HMAC-based Reset Tokens (stateless, serverless-safe) ───
+// Instead of storing tokens in an in-memory Map (which is lost on serverless cold starts),
+// we encode the email + timestamp into the token and sign it with HMAC.
+// The token is self-contained and verifiable without any server-side storage.
+
+const RESET_SECRET = process.env.JWT_SECRET || 'educampushub-reset-secret-fallback'
 const RESET_TOKEN_EXPIRY_MS = 10 * 60 * 1000 // 10 minutes
+
+function createResetToken(email: string): string {
+  const payload = Buffer.from(JSON.stringify({ email, createdAt: Date.now() })).toString('base64url')
+  const signature = createHmac('sha256', RESET_SECRET).update(payload).digest('base64url')
+  return `${payload}.${signature}`
+}
+
+function verifyResetToken(token: string): { email: string; createdAt: number } | null {
+  try {
+    const [payload, signature] = token.split('.')
+    const expectedSignature = createHmac('sha256', RESET_SECRET).update(payload).digest('base64url')
+    if (signature !== expectedSignature) return null
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { email: string; createdAt: number }
+    if (Date.now() - data.createdAt > RESET_TOKEN_EXPIRY_MS) return null
+    return data
+  } catch {
+    return null
+  }
+}
 
 /**
  * POST /api/auth/forgot-password
@@ -78,16 +102,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Admin accounts must use the admin panel to reset passwords.' }, { status: 400 })
       }
 
-      // Generate a reset token
-      const resetToken = randomUUID()
-      resetTokens.set(resetToken, { email: sanitizedEmail, createdAt: Date.now() })
-
-      // Clean up expired tokens
-      for (const [key, value] of resetTokens) {
-        if (Date.now() - value.createdAt > RESET_TOKEN_EXPIRY_MS) {
-          resetTokens.delete(key)
-        }
-      }
+      // Generate a stateless HMAC-signed reset token
+      const resetToken = createResetToken(sanitizedEmail)
 
       return NextResponse.json({
         success: true,
@@ -107,16 +123,10 @@ export async function POST(request: Request) {
 
       const sanitizedEmail = email.toLowerCase().trim()
 
-      // Verify reset token
-      const tokenData = resetTokens.get(resetToken)
+      // Verify HMAC-signed reset token (stateless — no in-memory lookup needed)
+      const tokenData = verifyResetToken(resetToken)
       if (!tokenData || tokenData.email !== sanitizedEmail) {
         return NextResponse.json({ error: 'Invalid or expired reset token. Please start over.' }, { status: 400 })
-      }
-
-      // Check token expiry
-      if (Date.now() - tokenData.createdAt > RESET_TOKEN_EXPIRY_MS) {
-        resetTokens.delete(resetToken)
-        return NextResponse.json({ error: 'Reset token expired. Please start over.' }, { status: 400 })
       }
 
       // Find user by email
@@ -148,9 +158,6 @@ export async function POST(request: Request) {
         UPDATE "UserSession" SET "isRevoked" = true
         WHERE "userId" = ${user.id} AND "isRevoked" = false
       `
-
-      // Delete the used reset token
-      resetTokens.delete(resetToken)
 
       return NextResponse.json({
         success: true,

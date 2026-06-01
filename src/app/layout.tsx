@@ -86,7 +86,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/og-image.png",
+        url: "/og-image.webp",
         width: 1200,
         height: 630,
         alt: "EduCampusHub - Student Marketplace",
@@ -98,7 +98,7 @@ export const metadata: Metadata = {
     title: "EduCampusHub — Buy • Sell • Exchange",
     description:
       "Buy & sell old books directly with students. Save up to 70% on textbooks.",
-    images: ["/og-image.png"],
+    images: ["/og-image.webp"],
   },
   robots: {
     index: true,

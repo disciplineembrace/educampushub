@@ -326,8 +326,6 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   const [searchTerm, setSearchTerm] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [revenueData, setRevenueData] = useState<{ totalRevenue: number; uploadFeeRevenue: number; premiumRevenue: number; premiumUsers: number; pendingPayments: number } | null>(null)
-  const [upiConfig, setUpiConfig] = useState<string>('')
-  const [upiSaving, setUpiSaving] = useState(false)
 
   // Admin accounts state (Super Admin only)
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountItem[]>([])
@@ -771,7 +769,7 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         {/* Logo area */}
         <div className="p-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <img src="/logo-512x512.png" alt="EduCampusHub" className="w-9 h-9 rounded-xl object-cover" />
+            <img src="/logo-512x512.webp" alt="EduCampusHub" className="w-9 h-9 rounded-xl object-cover" />
             <div>
               <p className="text-sm font-bold text-slate-100">EduCampusHub</p>
               <p className="text-[10px] text-slate-500 uppercase tracking-wider">Control Panel</p>

@@ -892,7 +892,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
         <Card className="p-8 bg-slate-900/80 border-slate-700/50 backdrop-blur-xl shadow-2xl">
           {/* Logo */}
           <div className="flex justify-center mb-6">
-            <img src="/logo-512x512.png" alt="EduCampusHub" className="w-14 h-14 rounded-2xl object-cover shadow-lg" />
+            <img src="/logo-512x512.webp" alt="EduCampusHub" className="w-14 h-14 rounded-2xl object-cover shadow-lg" />
           </div>
 
           <h1 className="text-xl font-semibold text-slate-100 text-center mb-1">

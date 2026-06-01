@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
     imageSizes: [16, 32, 48, 64, 96, 128, 256],
   },
   experimental: {
-    optimizePackageImports: ['lucide-react', 'framer-motion', 'recharts'],
+    optimizePackageImports: ['lucide-react', 'framer-motion', '@mdxeditor/editor', '@radix-ui/react-icons'],
     experimentalBuildMode: 'compile',
   },
   staticPageGenerationTimeout: 120,

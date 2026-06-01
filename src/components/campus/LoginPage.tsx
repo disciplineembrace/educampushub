@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck, CheckCircle2 } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
@@ -35,24 +35,13 @@ export default function LoginPage() {
   // Forgot Password state
   const [forgotStep, setForgotStep] = useState<ForgotPasswordStep>('none')
   const [forgotEmail, setForgotEmail] = useState('')
-  const [forgotOtp, setForgotOtp] = useState('')
   const [forgotNewPassword, setForgotNewPassword] = useState('')
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('')
   const [forgotShowNewPassword, setForgotShowNewPassword] = useState(false)
   const [forgotShowConfirmPassword, setForgotShowConfirmPassword] = useState(false)
-  const [forgotMaskedEmail, setForgotMaskedEmail] = useState('')
   const [forgotVerificationToken, setForgotVerificationToken] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
   const [forgotError, setForgotError] = useState('')
-  const [otpResendTimer, setOtpResendTimer] = useState(0)
-
-  // OTP resend timer
-  useEffect(() => {
-    if (otpResendTimer > 0) {
-      const timer = setTimeout(() => setOtpResendTimer(otpResendTimer - 1), 1000)
-      return () => clearTimeout(timer)
-    }
-  }, [otpResendTimer])
 
   // ─── Login Handler ───
 

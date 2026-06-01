@@ -76,12 +76,12 @@ export default function Navbar() {
               whileTap={{ scale: 0.98 }}
             >
               <img 
-                src="/logo.jpeg" 
+                src="/logo.webp"
                 alt="EduCampusHub" 
                 className="w-9 h-9 rounded-xl object-cover shadow-md dark:hidden"
               />
               <img 
-                src="/logo-dark.jpeg" 
+                src="/logo-dark.webp"
                 alt="EduCampusHub" 
                 className="w-9 h-9 rounded-xl object-cover shadow-md hidden dark:block"
               />

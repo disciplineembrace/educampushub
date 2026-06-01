@@ -52,7 +52,7 @@ export default function Footer() {
           <div className="lg:col-span-2">
             <div className="flex items-center gap-2.5 mb-4">
               <img 
-                src="/logo.jpeg" 
+                src="/logo.webp"
                 alt="EduCampusHub" 
                 className="w-9 h-9 rounded-xl object-cover"
               />

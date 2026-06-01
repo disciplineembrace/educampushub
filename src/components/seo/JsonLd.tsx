@@ -4,7 +4,7 @@ export function OrganizationJsonLd() {
     '@type': 'Organization',
     name: 'EduCampusHub',
     url: 'https://educampushub-beta.vercel.app',
-    logo: 'https://educampushub-beta.vercel.app/logo-512x512.png',
+    logo: 'https://educampushub-beta.vercel.app/logo-512x512.webp',
     description: "India's trusted student marketplace for books, notes, and study essentials. Buy, sell, and exchange textbooks directly with students.",
     sameAs: [
       'https://www.instagram.com/educampushubofficial',
