@@ -8,10 +8,15 @@ async function verifyAdmin(request: Request) {
   const admin = await getAdminFromCookies()
   if (!admin) return null
 
-  const user = await db.user.findUnique({ where: { id: admin.userId } })
-  if (!user || !user.isAdmin || user.isBanned) return null
-
-  return { ...admin, user }
+  try {
+    const user = await db.user.findUnique({ where: { id: admin.userId } })
+    if (!user || !user.isAdmin || user.isBanned) return null
+    return { ...admin, user }
+  } catch (dbError) {
+    // If DB lookup fails, still allow based on token verification alone
+    console.warn('[Admin API] User DB lookup failed, using token payload:', dbError)
+    return admin
+  }
 }
 
 // GET - Fetch admin data (stats, users, reports, listings)

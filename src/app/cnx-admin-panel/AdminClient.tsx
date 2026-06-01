@@ -366,12 +366,28 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         fetch('/api/cnx-admin?type=reports'),
         fetch('/api/cnx-admin?type=listings'),
       ])
+      
+      // If any returns 401, session is invalid - force re-login
+      if (statsRes.status === 401 || usersRes.status === 401) {
+        toast.error('Session expired. Please log in again.')
+        setAdmin(null)
+        return
+      }
+      
       if (statsRes.ok) setStats(await statsRes.json())
+      else console.error('Stats fetch error:', statsRes.status)
+      
       if (usersRes.ok) { const d = await usersRes.json(); setUsers(d.users || []) }
+      else console.error('Users fetch error:', usersRes.status)
+      
       if (reportsRes.ok) { const d = await reportsRes.json(); setReports(d.reports || []) }
+      else console.error('Reports fetch error:', reportsRes.status)
+      
       if (listingsRes.ok) { const d = await listingsRes.json(); setListings(d.listings || []) }
+      else console.error('Listings fetch error:', listingsRes.status)
     } catch (err) {
       console.error('Admin fetch error:', err)
+      toast.error('Failed to load data. Please refresh.')
     } finally {
       setLoading(false)
     }

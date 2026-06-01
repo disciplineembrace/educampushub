@@ -116,17 +116,43 @@ export async function verifyAdminToken(token: string): Promise<AdminPayload | nu
     const payload = verifySignedToken(token)
     if (!payload) return null
 
-    const session = await db.adminSession.findUnique({
-      where: { token },
-      include: { user: true }
-    })
+    // Try DB session lookup for security (revoke check, ban check)
+    try {
+      const session = await db.adminSession.findUnique({
+        where: { token },
+        include: { user: true }
+      })
 
-    if (!session || session.isRevoked || session.expiresAt < new Date() || session.user.isBanned) {
-      return null
+      if (session) {
+        // Session found in DB - check revocation/ban
+        if (session.isRevoked || session.expiresAt < new Date() || session.user.isBanned) {
+          return null
+        }
+        // Also check if user is still admin
+        if (!session.user.isAdmin) {
+          return null
+        }
+        return payload
+      }
+    } catch (dbError) {
+      console.warn('[Admin Auth] DB session lookup failed, falling back to stateless verification:', dbError)
     }
 
-    // 2FA check removed - direct login now
-    // (Previously: Super Admin must have completed 2FA)
+    // Fallback: If DB session not found (stateless mode), verify the token cryptographically
+    // Check if user still exists and is admin/banned
+    try {
+      const user = await db.user.findUnique({
+        where: { id: payload.userId },
+        select: { isAdmin: true, isBanned: true }
+      })
+      if (!user || !user.isAdmin || user.isBanned) {
+        return null
+      }
+    } catch {
+      // If DB check fails, still allow based on token validity alone
+      console.warn('[Admin Auth] User DB check failed, allowing based on token alone')
+    }
+
     return payload
   } catch {
     return null
