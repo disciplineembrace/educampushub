@@ -306,38 +306,8 @@ export async function POST(request: Request) {
 
     const role = (user.adminRole || 'support_admin') as AdminRole
     const isSuperAdmin = user.isSuperAdmin || user.adminRole === 'super_admin'
-    // All admin accounts require OTP verification
-    const requires2FA = true
 
-    // ─── If Super Admin or 2FA enabled, require OTP before granting full access ───
-    if (requires2FA) {
-      // Create audit log for login attempt (password verified, pending 2FA)
-      const sql = getNeonSql()
-      await sql`
-        INSERT INTO "AuditLog" (id, "actorId", action, "targetType", "targetId", details, "ipAddress", "createdAt")
-        VALUES (gen_random_uuid(), ${user.id}, 'login_password_ok_2fa_pending', 'user', ${user.id},
-        ${JSON.stringify({ role, isSuperAdmin })}, ${ip}, CURRENT_TIMESTAMP)
-      `
-
-      // Return that 2FA is required — DO NOT create a session yet
-      // Reset rate limit since password was correct
-      loginAttempts.delete(ip)
-
-      return NextResponse.json({
-        success: true,
-        requires2FA: true,
-        admin: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.adminRole || 'support_admin',
-          isSuperAdmin,
-          mustChangePassword: user.mustChangePassword,
-        }
-      })
-    }
-
-    // ─── No 2FA required: Create session directly ───
+    // ─── Direct login (OTP/2FA removed): Create session directly ───
     let token
     try {
       const userAgent = request.headers.get('user-agent') || undefined

@@ -107,15 +107,15 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
         return
       }
 
-      // Check if 2FA is required (Super Admin or 2FA-enabled account)
+      // Check if 2FA is required (disabled - direct login now)
       if (data.requires2FA) {
-        setTwoFactorAdmin(data.admin)
-        setStep('two_factor')
-        setTwoFactorOtpValue('')
-        setTwoFactorError('')
-        setTwoFactorOtpSent(false)
-        // Automatically send OTP
-        send2FAOTP(data.admin.email)
+        // 2FA is disabled - proceed directly to login
+        if (data.admin?.mustChangePassword) {
+          setMustChangePassword(true)
+          setAdminEmail(email)
+        } else {
+          onLogin(data.admin)
+        }
         return
       }
 
@@ -450,13 +450,12 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
 
       if (loginRes.ok) {
         if (loginData.requires2FA) {
-          // Need 2FA again after password change
-          setTwoFactorAdmin(loginData.admin)
-          setStep('two_factor')
-          setTwoFactorOtpValue('')
-          setTwoFactorError('')
-          setTwoFactorOtpSent(false)
-          send2FAOTP(loginData.admin.email)
+          // 2FA disabled - proceed directly
+          if (loginData.admin?.mustChangePassword) {
+            // Shouldn't happen since we just changed it, but handle gracefully
+          } else {
+            onLogin(loginData.admin)
+          }
         } else {
           onLogin(loginData.admin)
         }

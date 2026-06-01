@@ -125,11 +125,8 @@ export async function verifyAdminToken(token: string): Promise<AdminPayload | nu
       return null
     }
 
-    // Super Admin must have completed 2FA
-    if (payload.isSuperAdmin && !payload.twoFactorVerified) {
-      return null
-    }
-
+    // 2FA check removed - direct login now
+    // (Previously: Super Admin must have completed 2FA)
     return payload
   } catch {
     return null
