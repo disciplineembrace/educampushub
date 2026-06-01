@@ -14,14 +14,9 @@
       "type": "image/png"
     },
     {
-      "src": "/logo-512x512.png",
+      "src": "/logo-512x512.webp",
       "sizes": "512x512",
-      "type": "image/png"
-    },
-    {
-      "src": "/logo.jpeg",
-      "sizes": "1024x1024",
-      "type": "image/jpeg"
+      "type": "image/webp"
     }
   ],
   "categories": ["education", "shopping", "lifestyle"],

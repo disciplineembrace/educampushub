@@ -15,7 +15,6 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     optimizePackageImports: ['lucide-react', 'framer-motion', '@mdxeditor/editor', '@radix-ui/react-icons'],
-    experimentalBuildMode: 'compile',
   },
   staticPageGenerationTimeout: 120,
   async headers() {

@@ -358,31 +358,46 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [statsRes, usersRes, reportsRes, listingsRes] = await Promise.all([
-        fetch('/api/cnx-admin?type=stats'),
-        fetch('/api/cnx-admin?type=users'),
-        fetch('/api/cnx-admin?type=reports'),
-        fetch('/api/cnx-admin?type=listings'),
-      ])
-      
-      // If any returns 401, session is invalid - force re-login
-      if (statsRes.status === 401 || usersRes.status === 401) {
-        toast.error('Session expired. Please log in again.')
-        setAdmin(null)
-        return
+      // Add timeout to prevent infinite loading
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15s timeout
+
+      try {
+        const [statsRes, usersRes, reportsRes, listingsRes] = await Promise.all([
+          fetch('/api/cnx-admin?type=stats', { signal: controller.signal }),
+          fetch('/api/cnx-admin?type=users', { signal: controller.signal }),
+          fetch('/api/cnx-admin?type=reports', { signal: controller.signal }),
+          fetch('/api/cnx-admin?type=listings', { signal: controller.signal }),
+        ])
+        
+        clearTimeout(timeoutId)
+
+        // If any returns 401, session is invalid - force re-login
+        if (statsRes.status === 401 || usersRes.status === 401) {
+          toast.error('Session expired. Please log in again.')
+          setAdmin(null)
+          return
+        }
+        
+        if (statsRes.ok) setStats(await statsRes.json())
+        else console.error('Stats fetch error:', statsRes.status)
+        
+        if (usersRes.ok) { const d = await usersRes.json(); setUsers(d.users || []) }
+        else console.error('Users fetch error:', usersRes.status)
+        
+        if (reportsRes.ok) { const d = await reportsRes.json(); setReports(d.reports || []) }
+        else console.error('Reports fetch error:', reportsRes.status)
+        
+        if (listingsRes.ok) { const d = await listingsRes.json(); setListings(d.listings || []) }
+        else console.error('Listings fetch error:', listingsRes.status)
+      } catch (fetchErr: unknown) {
+        clearTimeout(timeoutId)
+        if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+          toast.error('Request timed out. Please check your connection and refresh.')
+        } else {
+          throw fetchErr
+        }
       }
-      
-      if (statsRes.ok) setStats(await statsRes.json())
-      else console.error('Stats fetch error:', statsRes.status)
-      
-      if (usersRes.ok) { const d = await usersRes.json(); setUsers(d.users || []) }
-      else console.error('Users fetch error:', usersRes.status)
-      
-      if (reportsRes.ok) { const d = await reportsRes.json(); setReports(d.reports || []) }
-      else console.error('Reports fetch error:', reportsRes.status)
-      
-      if (listingsRes.ok) { const d = await listingsRes.json(); setListings(d.listings || []) }
-      else console.error('Listings fetch error:', listingsRes.status)
     } catch (err) {
       console.error('Admin fetch error:', err)
       toast.error('Failed to load data. Please refresh.')

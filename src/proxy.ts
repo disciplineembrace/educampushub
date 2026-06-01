@@ -5,27 +5,9 @@ import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit'
 // Routes that should NOT be rate-limited or blocked
 const ALLOWED_ADMIN_ROUTES = ['/cnx-admin-panel', '/api/cnx-admin', '/api/cnx-admin-auth', '/api/cnx-admin-forgot-password', '/api/cnx-admin-init']
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const response = NextResponse.next()
-
-  // ─── Security Headers ─────────────────────────────────────────
-  response.headers.set('X-Frame-Options', 'DENY')
-  response.headers.set('X-Content-Type-Options', 'nosniff')
-  response.headers.set('X-XSS-Protection', '1; mode=block')
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  response.headers.set(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' https://fonts.gstatic.com",
-      "connect-src 'self' https: wss:",
-      "frame-ancestors 'none'",
-    ].join('; ')
-  )
 
   // ─── Rate Limiting (API routes only) ──────────────────────────
   if (pathname.startsWith('/api/')) {
