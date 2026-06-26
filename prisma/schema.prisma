@@ -40,6 +40,12 @@ model User {
   premiumBookLimit    Int             @default(29)
   premiumExpiryDate   DateTime?
   premiumPurchaseDate DateTime?
+  // ─── Security Question (Password Reset Recovery) ───
+  securityQuestionIdx Int?            // index (0-6) into the SECURITY_QUESTIONS list, null if not set
+  securityAnswerHash  String?         // bcrypt hash of normalized answer (never store plaintext)
+  securityAttempts    Int             @default(0) // failed verification attempts (for brute-force protection)
+  securityLockedUntil DateTime?      // lockout expiry timestamp; if set, answer verification is blocked
+  securityUpdatedAt   DateTime?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   listings            Listing[]

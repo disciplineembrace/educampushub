@@ -2,15 +2,28 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck, CheckCircle2 } from 'lucide-react'
+import { Sparkles, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck, CheckCircle2, ShieldQuestion, AlertCircle } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
 import { useTranslation } from '@/lib/i18n/TranslationContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
+// ─── Security Questions (mirrors src/lib/security-question.ts) ───
+// Duplicated here so the client bundle doesn't need to import server-side bcrypt.
+const SECURITY_QUESTIONS = [
+  'What is your favorite book?',
+  'What was your childhood nickname?',
+  'What was the name of your first teacher?',
+  'What is your favorite movie?',
+  'What is your favorite place?',
+  'What was the name of your childhood best friend?',
+  'What is your favorite color?',
+]
 
 type AuthTab = 'login' | 'register'
-type ForgotPasswordStep = 'none' | 'email' | 'reset' | 'success'
+type ForgotPasswordStep = 'none' | 'email' | 'security' | 'reset' | 'success'
 
 export default function LoginPage() {
   const { setCurrentPage, setCurrentUser } = useAppStore()
@@ -31,10 +44,16 @@ export default function LoginPage() {
   const [regPhone, setRegPhone] = useState('')
   const [regPassword, setRegPassword] = useState('')
   const [regConfirmPassword, setRegConfirmPassword] = useState('')
+  // ─── Security question state (registration) ───
+  const [regSecurityQuestionIdx, setRegSecurityQuestionIdx] = useState<number | ''>('')
+  const [regSecurityAnswer, setRegSecurityAnswer] = useState('')
 
   // Forgot Password state
   const [forgotStep, setForgotStep] = useState<ForgotPasswordStep>('none')
   const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotSecurityQuestion, setForgotSecurityQuestion] = useState('')
+  const [forgotSecurityAnswer, setForgotSecurityAnswer] = useState('')
+  const [forgotRemainingAttempts, setForgotRemainingAttempts] = useState<number | null>(null)
   const [forgotNewPassword, setForgotNewPassword] = useState('')
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('')
   const [forgotShowNewPassword, setForgotShowNewPassword] = useState(false)
@@ -134,6 +153,24 @@ export default function LoginPage() {
       return
     }
 
+    // ─── Security question validation ───
+    if (regSecurityQuestionIdx === '' || regSecurityQuestionIdx === null || regSecurityQuestionIdx === undefined) {
+      setError('Please select a security question')
+      return
+    }
+    if (!regSecurityAnswer.trim()) {
+      setError('Please enter an answer to your security question')
+      return
+    }
+    if (regSecurityAnswer.trim().length < 2) {
+      setError('Security answer must be at least 2 characters')
+      return
+    }
+    if (regSecurityAnswer.trim().length > 100) {
+      setError('Security answer must be at most 100 characters')
+      return
+    }
+
     setLoading(true)
     try {
       const res = await fetch('/api/auth', {
@@ -145,6 +182,8 @@ export default function LoginPage() {
           email: regEmail,
           password: regPassword,
           phone: regPhone || undefined,
+          securityQuestionIdx: regSecurityQuestionIdx,
+          securityAnswer: regSecurityAnswer,
         })
       })
       const data = await res.json()
@@ -199,7 +238,82 @@ export default function LoginPage() {
         return
       }
 
+      // If user has no security question set, show a notice
+      if (data.needsSetup) {
+        setForgotError(data.message || 'No security question is set. Please log in and set one from your profile.')
+        return
+      }
+
+      // If account is temporarily locked
+      if (data.locked) {
+        setForgotError(data.message || 'Account temporarily locked. Try again later.')
+        return
+      }
+
+      // Move to the security-question step
+      setForgotSecurityQuestion(data.securityQuestion || '')
+      setForgotSecurityAnswer('')
+      setForgotRemainingAttempts(null)
+      setForgotStep('security')
+    } catch {
+      setForgotError(t('forgotPassword.error.wentWrong'))
+    } finally {
+      setForgotLoading(false)
+    }
+  }
+
+  // ─── Verify Security Answer ───
+
+  const handleVerifySecurityAnswer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setForgotError('')
+
+    if (!forgotSecurityAnswer.trim()) {
+      setForgotError('Please enter your security answer')
+      return
+    }
+    if (forgotSecurityAnswer.trim().length < 2) {
+      setForgotError('Security answer must be at least 2 characters')
+      return
+    }
+    if (forgotSecurityAnswer.trim().length > 100) {
+      setForgotError('Security answer must be at most 100 characters')
+      return
+    }
+
+    setForgotLoading(true)
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify_answer',
+          email: forgotEmail,
+          securityAnswer: forgotSecurityAnswer,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        // If account is locked, show lockout message
+        if (data.locked) {
+          setForgotError(data.error || 'Too many incorrect attempts. Account temporarily locked.')
+          return
+        }
+        // Otherwise: wrong answer. Show generic error (server returns the same string
+        // for any wrong/missing case to avoid revealing which part is wrong).
+        if (typeof data.remainingAttempts === 'number') {
+          setForgotRemainingAttempts(data.remainingAttempts)
+        } else {
+          setForgotRemainingAttempts(null)
+        }
+        setForgotError(data.error || 'Invalid security answer.')
+        return
+      }
+
+      // Answer verified — store the reset token and proceed to password reset
       setForgotVerificationToken(data.resetToken || '')
+      setForgotRemainingAttempts(null)
       setForgotStep('reset')
     } catch {
       setForgotError(t('forgotPassword.error.wentWrong'))
@@ -263,9 +377,12 @@ export default function LoginPage() {
   const resetForgotPassword = () => {
     setForgotStep('none')
     setForgotEmail('')
+    setForgotSecurityQuestion('')
+    setForgotSecurityAnswer('')
     setForgotNewPassword('')
     setForgotConfirmPassword('')
     setForgotVerificationToken('')
+    setForgotRemainingAttempts(null)
     setForgotError('')
   }
 
@@ -286,9 +403,15 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={() => {
-              if (forgotStep === 'reset') {
-                setForgotStep('email')
-                setForgotError('')
+              if (forgotStep === 'reset' || forgotStep === 'security') {
+                // Go back one step (reset → security → email → none)
+                if (forgotStep === 'reset') {
+                  setForgotStep('security')
+                  setForgotError('')
+                } else {
+                  setForgotStep('email')
+                  setForgotError('')
+                }
               } else {
                 resetForgotPassword()
               }
@@ -305,6 +428,8 @@ export default function LoginPage() {
                 <CheckCircle2 className="w-5 h-5 text-emerald-500" />
               ) : forgotStep === 'reset' ? (
                 <ShieldCheck className="w-5 h-5 text-brand" />
+              ) : forgotStep === 'security' ? (
+                <ShieldQuestion className="w-5 h-5 text-brand" />
               ) : (
                 <KeyRound className="w-5 h-5 text-brand" />
               )}
@@ -312,11 +437,13 @@ export default function LoginPage() {
             <div>
               <h2 className="text-xl font-bold text-foreground font-heading">
                 {forgotStep === 'email' && t('forgotPassword.title')}
+                {forgotStep === 'security' && 'Security Question'}
                 {forgotStep === 'reset' && t('forgotPassword.resetTitle')}
                 {forgotStep === 'success' && t('forgotPassword.successTitle')}
               </h2>
               <p className="text-sm text-muted-foreground">
-                {forgotStep === 'email' && t('forgotPassword.subtitle')}
+                {forgotStep === 'email' && 'Enter your registered email to recover your account.'}
+                {forgotStep === 'security' && 'Answer your security question to verify your identity.'}
                 {forgotStep === 'reset' && t('forgotPassword.resetSubtitle')}
                 {forgotStep === 'success' && t('forgotPassword.successSubtitle')}
               </p>
@@ -324,18 +451,18 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Progress Steps */}
+        {/* Progress Steps — 3 steps now: Email → Security → Reset */}
         {forgotStep !== 'success' && (
           <div className="flex items-center gap-2">
-            {['email', 'reset'].map((step, i) => {
-              const stepOrder = ['email', 'reset']
+            {['email', 'security', 'reset'].map((step, i) => {
+              const stepOrder = ['email', 'security', 'reset']
               const currentIndex = stepOrder.indexOf(forgotStep)
               const stepIndex = i
               const isActive = stepIndex === currentIndex
               const isCompleted = stepIndex < currentIndex
               return (
                 <div key={step} className="flex items-center gap-2 flex-1">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shrink-0 ${
                     isCompleted ? 'bg-emerald-500 text-white' :
                     isActive ? 'bg-brand text-white' :
                     'bg-muted text-muted-foreground'
@@ -346,9 +473,10 @@ export default function LoginPage() {
                     isActive ? 'text-foreground' : 'text-muted-foreground'
                   }`}>
                     {i === 0 && t('forgotPassword.step1')}
-                    {i === 1 && t('forgotPassword.step3')}
+                    {i === 1 && 'Security'}
+                    {i === 2 && t('forgotPassword.step3')}
                   </span>
-                  {i < 1 && (
+                  {i < 2 && (
                     <div className={`h-0.5 flex-1 rounded-full transition-all ${
                       isCompleted ? 'bg-emerald-500' : 'bg-muted'
                     }`} />
@@ -361,8 +489,9 @@ export default function LoginPage() {
 
         {/* Error Display */}
         {forgotError && (
-          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 text-sm">
-            {forgotError}
+          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 text-sm flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{forgotError}</span>
           </div>
         )}
 
@@ -389,14 +518,63 @@ export default function LoginPage() {
               disabled={forgotLoading}
               className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
             >
-              {forgotLoading ? t('forgotPassword.button.sending') : (
-                <>{t('forgotPassword.button.sendOtp')} <ArrowRight className="w-4 h-4" /></>
+              {forgotLoading ? 'Verifying email...' : (
+                <>Continue <ArrowRight className="w-4 h-4" /></>
               )}
             </Button>
           </form>
         )}
 
-        {/* Step 2: Reset Password */}
+        {/* Step 2: Security Question */}
+        {forgotStep === 'security' && (
+          <form onSubmit={handleVerifySecurityAnswer} className="space-y-4">
+            <div className="p-4 rounded-xl bg-brand/5 border border-brand/20">
+              <p className="text-xs font-semibold text-brand uppercase tracking-wide mb-1">
+                Your Security Question
+              </p>
+              <p className="text-sm text-foreground font-medium leading-relaxed">
+                {forgotSecurityQuestion}
+              </p>
+            </div>
+
+            <div>
+              <Label className="mb-1.5 block">Your Answer</Label>
+              <div className="relative">
+                <ShieldQuestion className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  value={forgotSecurityAnswer}
+                  onChange={e => setForgotSecurityAnswer(e.target.value)}
+                  placeholder="Enter your answer"
+                  required
+                  autoFocus
+                  maxLength={100}
+                  className="h-12 pl-10 rounded-xl"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Answer exactly as you did when setting up the question. Case-insensitive.
+              </p>
+              {typeof forgotRemainingAttempts === 'number' && forgotRemainingAttempts > 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  {forgotRemainingAttempts} attempt{forgotRemainingAttempts === 1 ? '' : 's'} remaining before temporary lockout.
+                </p>
+              )}
+            </div>
+
+            <Button
+              type="submit"
+              disabled={forgotLoading}
+              className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+            >
+              {forgotLoading ? 'Verifying answer...' : (
+                <>Verify Answer <ArrowRight className="w-4 h-4" /></>
+              )}
+            </Button>
+          </form>
+        )}
+
+        {/* Step 3: Reset Password */}
         {forgotStep === 'reset' && (
           <form onSubmit={handleResetPassword} className="space-y-4">
             <div>
@@ -802,6 +980,58 @@ export default function LoginPage() {
                           >
                             {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
+                        </div>
+                      </div>
+
+                      {/* ─── Security Question (required for registration) ─── */}
+                      <div className="pt-2 border-t border-border">
+                        <div className="flex items-center gap-2 mb-3">
+                          <ShieldQuestion className="w-4 h-4 text-brand" />
+                          <p className="text-sm font-semibold text-foreground">
+                            Security Question
+                          </p>
+                          <span className="text-xs text-muted-foreground">
+                            (for password recovery)
+                          </span>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <Label className="mb-1.5 block text-xs">Select a question</Label>
+                            <Select
+                              value={regSecurityQuestionIdx === '' ? '' : String(regSecurityQuestionIdx)}
+                              onValueChange={v => setRegSecurityQuestionIdx(v === '' ? '' : Number(v))}
+                            >
+                              <SelectTrigger className="h-12 rounded-xl">
+                                <SelectValue placeholder="Choose a security question" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {SECURITY_QUESTIONS.map((q, idx) => (
+                                  <SelectItem key={idx} value={String(idx)}>
+                                    {q}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <Label className="mb-1.5 block text-xs">Your answer</Label>
+                            <div className="relative">
+                              <ShieldQuestion className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                              <Input
+                                type="text"
+                                value={regSecurityAnswer}
+                                onChange={e => setRegSecurityAnswer(e.target.value)}
+                                placeholder="Enter your answer"
+                                maxLength={100}
+                                className="h-12 pl-10 rounded-xl"
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1.5">
+                              You&apos;ll need to answer this exactly to reset your password. Case-insensitive.
+                            </p>
+                          </div>
                         </div>
                       </div>
 

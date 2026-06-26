@@ -3,12 +3,27 @@ import { NextResponse } from 'next/server'
 import { checkApiRateLimit, isValidEmail, sanitizeString } from '@/lib/api-security'
 import bcrypt from 'bcryptjs'
 import { createHmac, randomUUID } from 'crypto'
+import {
+  SECURITY_QUESTIONS,
+  isValidSecurityQuestionIndex,
+  validateSecurityAnswer,
+  hashSecurityAnswer,
+} from '@/lib/security-question'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'educampushub-insecure-dev-secret-change-me'
 
 // Strip sensitive fields from user object before returning
 function sanitizeUser(user: Record<string, unknown>) {
-  const { passwordHash, adminSessions, auditLogs, sessions, ...safe } = user
+  const {
+    passwordHash,
+    adminSessions,
+    auditLogs,
+    sessions,
+    securityAnswerHash,   // NEVER expose the hashed answer to the client
+    securityAttempts,     // Don't reveal how many failed attempts the user has
+    securityLockedUntil,
+    ...safe
+  } = user
   return safe
 }
 
@@ -73,7 +88,7 @@ export async function POST(request: Request) {
 
     // ─── REGISTER (No OTP required — direct email + password signup) ───
     if (action === 'register') {
-      const { name, email, password, phone } = body
+      const { name, email, password, phone, securityQuestionIdx, securityAnswer } = body
 
       // Validate required fields
       if (!name || typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 100) {
@@ -100,6 +115,20 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Password must include uppercase, lowercase, number, and special character' }, { status: 400 })
       }
 
+      // ─── Security question validation (REQUIRED for new registrations) ───
+      if (!isValidSecurityQuestionIndex(securityQuestionIdx)) {
+        return NextResponse.json({ error: 'Please select a valid security question' }, { status: 400 })
+      }
+
+      if (!securityAnswer || typeof securityAnswer !== 'string') {
+        return NextResponse.json({ error: 'Security answer is required' }, { status: 400 })
+      }
+
+      const answerValidation = validateSecurityAnswer(securityAnswer)
+      if (!answerValidation.valid) {
+        return NextResponse.json({ error: answerValidation.error || 'Invalid security answer' }, { status: 400 })
+      }
+
       const sanitizedEmail = email.toLowerCase().trim()
       const sanitizedName = sanitizeString(name.trim(), 100)
 
@@ -112,6 +141,9 @@ export async function POST(request: Request) {
       // Hash password with bcrypt (12 rounds)
       const passwordHash = await bcrypt.hash(password, 12)
 
+      // Hash security answer with bcrypt (12 rounds, normalized)
+      const securityAnswerHash = await hashSecurityAnswer(securityAnswer)
+
       // Create user (directly verified since no OTP needed)
       const user = await db.user.create({
         data: {
@@ -120,6 +152,9 @@ export async function POST(request: Request) {
           phone: phone ? sanitizeString(phone.trim(), 20) : null,
           passwordHash,
           isVerified: true,
+          securityQuestionIdx,
+          securityAnswerHash,
+          securityUpdatedAt: new Date(),
         },
       })
 

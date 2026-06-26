@@ -1,0 +1,839 @@
+     1→'use client'
+     2→
+     3→import { useState } from 'react'
+     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→import { Sparkles, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck, CheckCircle2 } from 'lucide-react'
+     6→import { useAppStore } from '@/lib/store'
+     7→import { useTranslation } from '@/lib/i18n/TranslationContext'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Input } from '@/components/ui/input'
+    10→import { Label } from '@/components/ui/label'
+    11→
+    12→type AuthTab = 'login' | 'register'
+    13→type ForgotPasswordStep = 'none' | 'email' | 'reset' | 'success'
+    14→
+    15→export default function LoginPage() {
+    16→  const { setCurrentPage, setCurrentUser } = useAppStore()
+    17→  const { t } = useTranslation()
+    18→  const [activeTab, setActiveTab] = useState<AuthTab>('login')
+    19→  const [loading, setLoading] = useState(false)
+    20→  const [error, setError] = useState('')
+    21→  const [showPassword, setShowPassword] = useState(false)
+    22→  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+    23→
+    24→  // Login form state
+    25→  const [loginEmail, setLoginEmail] = useState('')
+    26→  const [loginPassword, setLoginPassword] = useState('')
+    27→
+    28→  // Register form state
+    29→  const [regName, setRegName] = useState('')
+    30→  const [regEmail, setRegEmail] = useState('')
+    31→  const [regPhone, setRegPhone] = useState('')
+    32→  const [regPassword, setRegPassword] = useState('')
+    33→  const [regConfirmPassword, setRegConfirmPassword] = useState('')
+    34→
+    35→  // Forgot Password state
+    36→  const [forgotStep, setForgotStep] = useState<ForgotPasswordStep>('none')
+    37→  const [forgotEmail, setForgotEmail] = useState('')
+    38→  const [forgotNewPassword, setForgotNewPassword] = useState('')
+    39→  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('')
+    40→  const [forgotShowNewPassword, setForgotShowNewPassword] = useState(false)
+    41→  const [forgotShowConfirmPassword, setForgotShowConfirmPassword] = useState(false)
+    42→  const [forgotVerificationToken, setForgotVerificationToken] = useState('')
+    43→  const [forgotLoading, setForgotLoading] = useState(false)
+    44→  const [forgotError, setForgotError] = useState('')
+    45→
+    46→  // ─── Login Handler ───
+    47→
+    48→  const handleLogin = async (e: React.FormEvent) => {
+    49→    e.preventDefault()
+    50→    setError('')
+    51→
+    52→    // Client-side validation
+    53→    if (!loginEmail) {
+    54→      setError(t('login.error.emailRequired'))
+    55→      return
+    56→    }
+    57→    if (!loginPassword) {
+    58→      setError(t('login.error.passwordRequired'))
+    59→      return
+    60→    }
+    61→
+    62→    setLoading(true)
+    63→    try {
+    64→      const res = await fetch('/api/auth', {
+    65→        method: 'POST',
+    66→        headers: { 'Content-Type': 'application/json' },
+    67→        body: JSON.stringify({
+    68→          action: 'login',
+    69→          email: loginEmail,
+    70→          password: loginPassword,
+    71→        })
+    72→      })
+    73→      const data = await res.json()
+    74→
+    75→      if (!res.ok) {
+    76→        // Map server errors to translation keys
+    77→        if (data.error === 'Invalid email or password') {
+    78→          setError(t('login.error.invalidCredentials'))
+    79→        } else if (data.error === 'This account has been banned') {
+    80→          setError(t('login.error.accountBanned'))
+    81→        } else {
+    82→          setError(data.error || t('login.error.loginFailed'))
+    83→        }
+    84→        return
+    85→      }
+    86→
+    87→      setCurrentUser(data.user)
+    88→      setCurrentPage('home')
+    89→    } catch {
+    90→      setError(t('login.error.wentWrong'))
+    91→    } finally {
+    92→      setLoading(false)
+    93→    }
+    94→  }
+    95→
+    96→  // ─── Registration (Direct, No OTP) ───
+    97→
+    98→  const handleRegister = async (e: React.FormEvent) => {
+    99→    e.preventDefault()
+   100→    setError('')
+   101→
+   102→    // Client-side validation
+   103→    if (!regName) {
+   104→      setError(t('login.error.nameRequired'))
+   105→      return
+   106→    }
+   107→    if (regName.trim().length < 2) {
+   108→      setError(t('login.error.nameRequired'))
+   109→      return
+   110→    }
+   111→    if (!regEmail) {
+   112→      setError(t('login.error.emailRequired'))
+   113→      return
+   114→    }
+   115→    if (!regPassword) {
+   116→      setError(t('login.error.passwordRequired'))
+   117→      return
+   118→    }
+   119→    if (regPassword.length < 8) {
+   120→      setError(t('login.error.passwordTooShort'))
+   121→      return
+   122→    }
+   123→    // Check password strength
+   124→    const hasUppercase = /[A-Z]/.test(regPassword)
+   125→    const hasLowercase = /[a-z]/.test(regPassword)
+   126→    const hasDigit = /\d/.test(regPassword)
+   127→    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(regPassword)
+   128→    if (!(hasUppercase && hasLowercase && hasDigit && hasSpecial)) {
+   129→      setError(t('login.error.passwordWeak'))
+   130→      return
+   131→    }
+   132→    if (regPassword !== regConfirmPassword) {
+   133→      setError(t('login.error.passwordMismatch'))
+   134→      return
+   135→    }
+   136→
+   137→    setLoading(true)
+   138→    try {
+   139→      const res = await fetch('/api/auth', {
+   140→        method: 'POST',
+   141→        headers: { 'Content-Type': 'application/json' },
+   142→        body: JSON.stringify({
+   143→          action: 'register',
+   144→          name: regName,
+   145→          email: regEmail,
+   146→          password: regPassword,
+   147→          phone: regPhone || undefined,
+   148→        })
+   149→      })
+   150→      const data = await res.json()
+   151→
+   152→      if (!res.ok) {
+   153→        if (data.error === 'Email already registered') {
+   154→          setError(t('login.error.emailExists'))
+   155→        } else {
+   156→          setError(data.error || t('login.error.wentWrong'))
+   157→        }
+   158→        return
+   159→      }
+   160→
+   161→      setCurrentUser(data.user)
+   162→      setCurrentPage('home')
+   163→    } catch {
+   164→      setError(t('login.error.wentWrong'))
+   165→    } finally {
+   166→      setLoading(false)
+   167→    }
+   168→  }
+   169→
+   170→  // ─── Forgot Password Handlers ───
+   171→
+   172→  const handleVerifyEmail = async (e: React.FormEvent) => {
+   173→    e.preventDefault()
+   174→    setForgotError('')
+   175→
+   176→    if (!forgotEmail) {
+   177→      setForgotError(t('login.error.emailRequired'))
+   178→      return
+   179→    }
+   180→
+   181→    // Basic email validation
+   182→    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+   183→    if (!emailRegex.test(forgotEmail)) {
+   184→      setForgotError(t('login.error.emailRequired'))
+   185→      return
+   186→    }
+   187→
+   188→    setForgotLoading(true)
+   189→    try {
+   190→      const res = await fetch('/api/auth/forgot-password', {
+   191→        method: 'POST',
+   192→        headers: { 'Content-Type': 'application/json' },
+   193→        body: JSON.stringify({ action: 'verify_email', email: forgotEmail }),
+   194→      })
+   195→      const data = await res.json()
+   196→
+   197→      if (!res.ok) {
+   198→        setForgotError(data.error || 'Failed to verify email')
+   199→        return
+   200→      }
+   201→
+   202→      setForgotVerificationToken(data.resetToken || '')
+   203→      setForgotStep('reset')
+   204→    } catch {
+   205→      setForgotError(t('forgotPassword.error.wentWrong'))
+   206→    } finally {
+   207→      setForgotLoading(false)
+   208→    }
+   209→  }
+   210→
+   211→  const handleResetPassword = async (e: React.FormEvent) => {
+   212→    e.preventDefault()
+   213→    setForgotError('')
+   214→
+   215→    if (!forgotNewPassword) {
+   216→      setForgotError(t('forgotPassword.error.passwordRequired'))
+   217→      return
+   218→    }
+   219→    if (forgotNewPassword.length < 8) {
+   220→      setForgotError(t('login.error.passwordTooShort'))
+   221→      return
+   222→    }
+   223→    const hasUppercase = /[A-Z]/.test(forgotNewPassword)
+   224→    const hasLowercase = /[a-z]/.test(forgotNewPassword)
+   225→    const hasDigit = /\d/.test(forgotNewPassword)
+   226→    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(forgotNewPassword)
+   227→    if (!(hasUppercase && hasLowercase && hasDigit && hasSpecial)) {
+   228→      setForgotError(t('login.error.passwordWeak'))
+   229→      return
+   230→    }
+   231→    if (forgotNewPassword !== forgotConfirmPassword) {
+   232→      setForgotError(t('login.error.passwordMismatch'))
+   233→      return
+   234→    }
+   235→
+   236→    setForgotLoading(true)
+   237→    try {
+   238→      const res = await fetch('/api/auth/forgot-password', {
+   239→        method: 'POST',
+   240→        headers: { 'Content-Type': 'application/json' },
+   241→        body: JSON.stringify({
+   242→          action: 'reset_password',
+   243→          email: forgotEmail,
+   244→          resetToken: forgotVerificationToken,
+   245→          newPassword: forgotNewPassword,
+   246→        }),
+   247→      })
+   248→      const data = await res.json()
+   249→
+   250→      if (!res.ok) {
+   251→        setForgotError(data.error || t('forgotPassword.error.resetFailed'))
+   252→        return
+   253→      }
+   254→
+   255→      setForgotStep('success')
+   256→    } catch {
+   257→      setForgotError(t('forgotPassword.error.wentWrong'))
+   258→    } finally {
+   259→      setForgotLoading(false)
+   260→    }
+   261→  }
+   262→
+   263→  const resetForgotPassword = () => {
+   264→    setForgotStep('none')
+   265→    setForgotEmail('')
+   266→    setForgotNewPassword('')
+   267→    setForgotConfirmPassword('')
+   268→    setForgotVerificationToken('')
+   269→    setForgotError('')
+   270→  }
+   271→
+   272→  // ─── Forgot Password UI ───
+   273→
+   274→  const renderForgotPassword = () => {
+   275→    return (
+   276→      <motion.div
+   277→        key="forgot-password"
+   278→        className="space-y-5"
+   279→        initial={{ opacity: 0, x: 20 }}
+   280→        animate={{ opacity: 1, x: 0 }}
+   281→        exit={{ opacity: 0, x: -20 }}
+   282→        transition={{ duration: 0.2 }}
+   283→      >
+   284→        {/* Header */}
+   285→        <div>
+   286→          <button
+   287→            type="button"
+   288→            onClick={() => {
+   289→              if (forgotStep === 'reset') {
+   290→                setForgotStep('email')
+   291→                setForgotError('')
+   292→              } else {
+   293→                resetForgotPassword()
+   294→              }
+   295→            }}
+   296→            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
+   297→          >
+   298→            <ArrowLeft className="w-4 h-4" />
+   299→            {t('forgotPassword.backToLogin')}
+   300→          </button>
+   301→
+   302→          <div className="flex items-center gap-3 mb-2">
+   303→            <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center">
+   304→              {forgotStep === 'success' ? (
+   305→                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+   306→              ) : forgotStep === 'reset' ? (
+   307→                <ShieldCheck className="w-5 h-5 text-brand" />
+   308→              ) : (
+   309→                <KeyRound className="w-5 h-5 text-brand" />
+   310→              )}
+   311→            </div>
+   312→            <div>
+   313→              <h2 className="text-xl font-bold text-foreground font-heading">
+   314→                {forgotStep === 'email' && t('forgotPassword.title')}
+   315→                {forgotStep === 'reset' && t('forgotPassword.resetTitle')}
+   316→                {forgotStep === 'success' && t('forgotPassword.successTitle')}
+   317→              </h2>
+   318→              <p className="text-sm text-muted-foreground">
+   319→                {forgotStep === 'email' && t('forgotPassword.subtitle')}
+   320→                {forgotStep === 'reset' && t('forgotPassword.resetSubtitle')}
+   321→                {forgotStep === 'success' && t('forgotPassword.successSubtitle')}
+   322→              </p>
+   323→            </div>
+   324→          </div>
+   325→        </div>
+   326→
+   327→        {/* Progress Steps */}
+   328→        {forgotStep !== 'success' && (
+   329→          <div className="flex items-center gap-2">
+   330→            {['email', 'reset'].map((step, i) => {
+   331→              const stepOrder = ['email', 'reset']
+   332→              const currentIndex = stepOrder.indexOf(forgotStep)
+   333→              const stepIndex = i
+   334→              const isActive = stepIndex === currentIndex
+   335→              const isCompleted = stepIndex < currentIndex
+   336→              return (
+   337→                <div key={step} className="flex items-center gap-2 flex-1">
+   338→                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+   339→                    isCompleted ? 'bg-emerald-500 text-white' :
+   340→                    isActive ? 'bg-brand text-white' :
+   341→                    'bg-muted text-muted-foreground'
+   342→                  }`}>
+   343→                    {isCompleted ? '✓' : i + 1}
+   344→                  </div>
+   345→                  <span className={`text-xs font-medium hidden sm:block ${
+   346→                    isActive ? 'text-foreground' : 'text-muted-foreground'
+   347→                  }`}>
+   348→                    {i === 0 && t('forgotPassword.step1')}
+   349→                    {i === 1 && t('forgotPassword.step3')}
+   350→                  </span>
+   351→                  {i < 1 && (
+   352→                    <div className={`h-0.5 flex-1 rounded-full transition-all ${
+   353→                      isCompleted ? 'bg-emerald-500' : 'bg-muted'
+   354→                    }`} />
+   355→                  )}
+   356→                </div>
+   357→              )
+   358→            })}
+   359→          </div>
+   360→        )}
+   361→
+   362→        {/* Error Display */}
+   363→        {forgotError && (
+   364→          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 text-sm">
+   365→            {forgotError}
+   366→          </div>
+   367→        )}
+   368→
+   369→        {/* Step 1: Email Input */}
+   370→        {forgotStep === 'email' && (
+   371→          <form onSubmit={handleVerifyEmail} className="space-y-4">
+   372→            <div>
+   373→              <Label className="mb-1.5 block">Email Address</Label>
+   374→              <div className="relative">
+   375→                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   376→                <Input
+   377→                  type="email"
+   378→                  value={forgotEmail}
+   379→                  onChange={e => setForgotEmail(e.target.value)}
+   380→                  placeholder="Enter your registered email"
+   381→                  required
+   382→                  className="h-12 pl-10 rounded-xl"
+   383→                />
+   384→              </div>
+   385→            </div>
+   386→
+   387→            <Button
+   388→              type="submit"
+   389→              disabled={forgotLoading}
+   390→              className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+   391→            >
+   392→              {forgotLoading ? t('forgotPassword.button.sending') : (
+   393→                <>{t('forgotPassword.button.sendOtp')} <ArrowRight className="w-4 h-4" /></>
+   394→              )}
+   395→            </Button>
+   396→          </form>
+   397→        )}
+   398→
+   399→        {/* Step 2: Reset Password */}
+   400→        {forgotStep === 'reset' && (
+   401→          <form onSubmit={handleResetPassword} className="space-y-4">
+   402→            <div>
+   403→              <Label className="mb-1.5 block">{t('forgotPassword.label.newPassword')}</Label>
+   404→              <div className="relative">
+   405→                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   406→                <Input
+   407→                  type={forgotShowNewPassword ? 'text' : 'password'}
+   408→                  value={forgotNewPassword}
+   409→                  onChange={e => setForgotNewPassword(e.target.value)}
+   410→                  placeholder={t('forgotPassword.placeholder.newPassword')}
+   411→                  required
+   412→                  className="h-12 pl-10 pr-10 rounded-xl"
+   413→                />
+   414→                <button
+   415→                  type="button"
+   416→                  onClick={() => setForgotShowNewPassword(!forgotShowNewPassword)}
+   417→                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   418→                >
+   419→                  {forgotShowNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+   420→                </button>
+   421→              </div>
+   422→            </div>
+   423→
+   424→            {/* Password strength indicator */}
+   425→            {forgotNewPassword && (
+   426→              <div className="space-y-1.5">
+   427→                <div className="flex gap-1">
+   428→                  {[
+   429→                    forgotNewPassword.length >= 8,
+   430→                    /[A-Z]/.test(forgotNewPassword),
+   431→                    /[a-z]/.test(forgotNewPassword),
+   432→                    /\d/.test(forgotNewPassword),
+   433→                    /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(forgotNewPassword),
+   434→                  ].map((met, i) => (
+   435→                    <div key={i} className={`h-1 flex-1 rounded-full transition-all ${
+   436→                      met ? 'bg-emerald-500' : 'bg-muted'
+   437→                    }`} />
+   438→                  ))}
+   439→                </div>
+   440→                <p className="text-xs text-muted-foreground">{t('forgotPassword.passwordStrength')}</p>
+   441→              </div>
+   442→            )}
+   443→
+   444→            <div>
+   445→              <Label className="mb-1.5 block">{t('forgotPassword.label.confirmPassword')}</Label>
+   446→              <div className="relative">
+   447→                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   448→                <Input
+   449→                  type={forgotShowConfirmPassword ? 'text' : 'password'}
+   450→                  value={forgotConfirmPassword}
+   451→                  onChange={e => setForgotConfirmPassword(e.target.value)}
+   452→                  placeholder={t('forgotPassword.placeholder.confirmPassword')}
+   453→                  required
+   454→                  className="h-12 pl-10 pr-10 rounded-xl"
+   455→                />
+   456→                <button
+   457→                  type="button"
+   458→                  onClick={() => setForgotShowConfirmPassword(!forgotShowConfirmPassword)}
+   459→                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   460→                >
+   461→                  {forgotShowConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+   462→                </button>
+   463→              </div>
+   464→            </div>
+   465→
+   466→            <Button
+   467→              type="submit"
+   468→              disabled={forgotLoading}
+   469→              className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+   470→            >
+   471→              {forgotLoading ? t('forgotPassword.button.resetting') : (
+   472→                <>{t('forgotPassword.button.resetPassword')} <ArrowRight className="w-4 h-4" /></>
+   473→              )}
+   474→            </Button>
+   475→          </form>
+   476→        )}
+   477→
+   478→        {/* Success Step */}
+   479→        {forgotStep === 'success' && (
+   480→          <div className="text-center py-4 space-y-4">
+   481→            <motion.div
+   482→              initial={{ scale: 0 }}
+   483→              animate={{ scale: 1 }}
+   484→              transition={{ type: 'spring', damping: 12, stiffness: 200 }}
+   485→              className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto"
+   486→            >
+   487→              <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+   488→            </motion.div>
+   489→            <p className="text-sm text-muted-foreground">{t('forgotPassword.successMessage')}</p>
+   490→            <Button
+   491→              onClick={() => {
+   492→                resetForgotPassword()
+   493→                setActiveTab('login')
+   494→              }}
+   495→              className="h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold px-8 gap-2"
+   496→            >
+   497→              {t('forgotPassword.button.goToLogin')} <ArrowRight className="w-4 h-4" />
+   498→            </Button>
+   499→          </div>
+   500→        )}
+   501→      </motion.div>
+   502→    )
+   503→  }
+   504→
+   505→  return (
+   506→    <div className="pt-16 min-h-screen flex">
+   507→      {/* Left side - Gradient branding (hidden on mobile) */}
+   508→      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-brand via-accent to-brand relative overflow-hidden items-center justify-center">
+   509→        <div className="absolute inset-0 bg-pattern opacity-20" />
+   510→        <div className="absolute top-20 right-20 w-72 h-72 bg-white/10 rounded-full blur-[80px]" />
+   511→        <div className="absolute bottom-20 left-20 w-96 h-96 bg-purple-light/10 rounded-full blur-[100px]" />
+   512→
+   513→        <div className="relative text-center px-12">
+   514→          <motion.div
+   515→            initial={{ opacity: 0, y: 30 }}
+   516→            animate={{ opacity: 1, y: 0 }}
+   517→            transition={{ duration: 0.7 }}
+   518→          >
+   519→            <motion.div
+   520→              animate={{ y: [0, -10, 0] }}
+   521→              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+   522→              className="mb-8"
+   523→            >
+   524→              <div className="w-24 h-24 rounded-3xl bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center mx-auto shadow-2xl">
+   525→                <Sparkles className="w-12 h-12 text-white" />
+   526→              </div>
+   527→            </motion.div>
+   528→            <h2 className="text-3xl font-bold text-white mb-4 font-heading">{t('login.brand.welcome')}</h2>
+   529→            <p className="text-white/70 max-w-sm mx-auto mb-8 leading-relaxed">
+   530→              {t('login.brand.tagline')}
+   531→            </p>
+   532→
+   533→            {/* Floating stats */}
+   534→            <div className="flex items-center justify-center gap-6">
+   535→              <div className="text-center">
+   536→                <p className="text-2xl font-bold text-white font-heading">{t('login.brand.0percent')}</p>
+   537→                <p className="text-xs text-white/60">{t('login.brand.commission')}</p>
+   538→              </div>
+   539→              <div className="w-px h-8 bg-white/20" />
+   540→              <div className="text-center">
+   541→                <p className="text-2xl font-bold text-white font-heading">{t('login.brand.direct')}</p>
+   542→                <p className="text-xs text-white/60">{t('login.brand.studentToStudent')}</p>
+   543→              </div>
+   544→              <div className="w-px h-8 bg-white/20" />
+   545→              <div className="text-center">
+   546→                <p className="text-2xl font-bold text-white font-heading">{t('login.brand.100percent')}</p>
+   547→                <p className="text-xs text-white/60">{t('login.brand.safeVerified')}</p>
+   548→              </div>
+   549→            </div>
+   550→          </motion.div>
+   551→        </div>
+   552→      </div>
+   553→
+   554→      {/* Right side - Form */}
+   555→      <div className="flex-1 flex items-center justify-center px-4 sm:px-6 py-10">
+   556→        <motion.div
+   557→          className="w-full max-w-md"
+   558→          initial={{ opacity: 0, x: 20 }}
+   559→          animate={{ opacity: 1, x: 0 }}
+   560→        >
+   561→          {/* Mobile header gradient bar */}
+   562→          <div className="lg:hidden mb-8 text-center">
+   563→            <div className="inline-flex items-center gap-2 mb-4">
+   564→              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand to-accent flex items-center justify-center">
+   565→                <Sparkles className="w-5 h-5 text-white" />
+   566→              </div>
+   567→              <span className="text-2xl font-bold font-heading">
+   568→                Edu<span className="gradient-text">CampusHub</span>
+   569→              </span>
+   570→            </div>
+   571→            <p className="text-muted-foreground text-sm">{t('login.mobileBrand.tagline')}</p>
+   572→          </div>
+   573→
+   574→          {forgotStep !== 'none' ? (
+   575→            // ─── Forgot Password Flow ───
+   576→            renderForgotPassword()
+   577→          ) : (
+   578→            // ─── Normal Login/Register Flow ───
+   579→            <>
+   580→              <div className="mb-6">
+   581→                <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2 font-heading">
+   582→                  {t('login.heading.prefix')} <span className="gradient-text">{t('login.heading.highlight')}</span>
+   583→                </h1>
+   584→                <p className="text-muted-foreground">
+   585→                  {t('login.subheading')}
+   586→                </p>
+   587→              </div>
+   588→
+   589→              {/* Tab Switcher */}
+   590→              <div className="flex mb-6 bg-muted/50 rounded-xl p-1">
+   591→                <button
+   592→                  type="button"
+   593→                  onClick={() => { setActiveTab('login'); setError('') }}
+   594→                  className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
+   595→                    activeTab === 'login'
+   596→                      ? 'bg-background shadow-sm text-foreground'
+   597→                      : 'text-muted-foreground hover:text-foreground'
+   598→                  }`}
+   599→                >
+   600→                  {t('login.tabs.login')}
+   601→                </button>
+   602→                <button
+   603→                  type="button"
+   604→                  onClick={() => { setActiveTab('register'); setError('') }}
+   605→                  className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
+   606→                    activeTab === 'register'
+   607→                      ? 'bg-background shadow-sm text-foreground'
+   608→                      : 'text-muted-foreground hover:text-foreground'
+   609→                  }`}
+   610→                >
+   611→                  {t('login.tabs.register')}
+   612→                </button>
+   613→              </div>
+   614→
+   615→              <AnimatePresence mode="wait">
+   616→                {activeTab === 'login' ? (
+   617→                  <motion.div
+   618→                    key="login"
+   619→                    className="space-y-4"
+   620→                    initial={{ opacity: 0, x: -20 }}
+   621→                    animate={{ opacity: 1, x: 0 }}
+   622→                    exit={{ opacity: 0, x: 20 }}
+   623→                    transition={{ duration: 0.2 }}
+   624→                  >
+   625→                    {error && (
+   626→                      <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 text-sm">
+   627→                        {error}
+   628→                      </div>
+   629→                    )}
+   630→
+   631→                    {/* ─── Email + Password Login ─── */}
+   632→                    <form onSubmit={handleLogin} className="space-y-4">
+   633→                      <div>
+   634→                        <Label className="mb-1.5 block">{t('login.label.collegeEmail')}</Label>
+   635→                        <div className="relative">
+   636→                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   637→                          <Input
+   638→                            type="email"
+   639→                            value={loginEmail}
+   640→                            onChange={e => setLoginEmail(e.target.value)}
+   641→                            placeholder={t('login.placeholder.email')}
+   642→                            required
+   643→                            className="h-12 pl-10 rounded-xl"
+   644→                          />
+   645→                        </div>
+   646→                      </div>
+   647→
+   648→                      <div>
+   649→                        <Label className="mb-1.5 block">{t('login.label.password')}</Label>
+   650→                        <div className="relative">
+   651→                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   652→                          <Input
+   653→                            type={showPassword ? 'text' : 'password'}
+   654→                            value={loginPassword}
+   655→                            onChange={e => setLoginPassword(e.target.value)}
+   656→                            placeholder={t('login.placeholder.password')}
+   657→                            required
+   658→                            className="h-12 pl-10 pr-10 rounded-xl"
+   659→                          />
+   660→                          <button
+   661→                            type="button"
+   662→                            onClick={() => setShowPassword(!showPassword)}
+   663→                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   664→                          >
+   665→                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+   666→                          </button>
+   667→                        </div>
+   668→                      </div>
+   669→
+   670→                      <div className="flex justify-end">
+   671→                        <button
+   672→                          type="button"
+   673→                          onClick={() => { setError(''); resetForgotPassword(); setForgotStep('email') }}
+   674→                          className="text-sm text-brand hover:underline"
+   675→                        >
+   676→                          {t('login.forgotPassword')}
+   677→                        </button>
+   678→                      </div>
+   679→
+   680→                      <Button
+   681→                        type="submit"
+   682→                        disabled={loading}
+   683→                        className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+   684→                      >
+   685→                        <span className="flex items-center gap-2">
+   686→                          {loading ? t('login.button.loggingIn') : <>{t('login.button.login')} <ArrowRight className="w-4 h-4" /></>}
+   687→                        </span>
+   688→                      </Button>
+   689→                    </form>
+   690→
+   691→                    <p className="text-center text-sm text-muted-foreground">
+   692→                      {t('login.noAccount')}{' '}
+   693→                      <button
+   694→                        type="button"
+   695→                        onClick={() => { setActiveTab('register'); setError('') }}
+   696→                        className="text-brand font-semibold hover:underline"
+   697→                      >
+   698→                        {t('login.tabs.register')}
+   699→                      </button>
+   700→                    </p>
+   701→                  </motion.div>
+   702→                ) : (
+   703→                  <motion.div
+   704→                    key="register"
+   705→                    className="space-y-4"
+   706→                    initial={{ opacity: 0, x: 20 }}
+   707→                    animate={{ opacity: 1, x: 0 }}
+   708→                    exit={{ opacity: 0, x: -20 }}
+   709→                    transition={{ duration: 0.2 }}
+   710→                  >
+   711→                    {error && (
+   712→                      <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 text-sm">
+   713→                        {error}
+   714→                      </div>
+   715→                    )}
+   716→
+   717→                    <form onSubmit={handleRegister} className="space-y-4">
+   718→                      <div>
+   719→                        <Label className="mb-1.5 block">{t('login.label.name')}</Label>
+   720→                        <div className="relative">
+   721→                          <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   722→                          <Input
+   723→                            type="text"
+   724→                            value={regName}
+   725→                            onChange={e => setRegName(e.target.value)}
+   726→                            placeholder={t('login.placeholder.name')}
+   727→                            required
+   728→                            className="h-12 pl-10 rounded-xl"
+   729→                          />
+   730→                        </div>
+   731→                      </div>
+   732→
+   733→                      <div>
+   734→                        <Label className="mb-1.5 block">{t('login.label.collegeEmail')}</Label>
+   735→                        <div className="relative">
+   736→                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   737→                          <Input
+   738→                            type="email"
+   739→                            value={regEmail}
+   740→                            onChange={e => setRegEmail(e.target.value)}
+   741→                            placeholder={t('login.placeholder.email')}
+   742→                            required
+   743→                            className="h-12 pl-10 rounded-xl"
+   744→                          />
+   745→                        </div>
+   746→                      </div>
+   747→
+   748→                      <div>
+   749→                        <Label className="mb-1.5 block">{t('login.label.phone')}</Label>
+   750→                        <div className="relative">
+   751→                          <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   752→                          <Input
+   753→                            type="tel"
+   754→                            value={regPhone}
+   755→                            onChange={e => setRegPhone(e.target.value)}
+   756→                            placeholder={t('login.placeholder.phone')}
+   757→                            className="h-12 pl-10 rounded-xl"
+   758→                            maxLength={14}
+   759→                          />
+   760→                        </div>
+   761→                        <p className="text-xs text-muted-foreground mt-1.5">Optional</p>
+   762→                      </div>
+   763→
+   764→                      <div>
+   765→                        <Label className="mb-1.5 block">{t('login.label.password')}</Label>
+   766→                        <div className="relative">
+   767→                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   768→                          <Input
+   769→                            type={showPassword ? 'text' : 'password'}
+   770→                            value={regPassword}
+   771→                            onChange={e => setRegPassword(e.target.value)}
+   772→                            placeholder={t('login.placeholder.password')}
+   773→                            required
+   774→                            className="h-12 pl-10 pr-10 rounded-xl"
+   775→                          />
+   776→                          <button
+   777→                            type="button"
+   778→                            onClick={() => setShowPassword(!showPassword)}
+   779→                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   780→                          >
+   781→                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+   782→                          </button>
+   783→                        </div>
+   784→                      </div>
+   785→
+   786→                      <div>
+   787→                        <Label className="mb-1.5 block">{t('login.label.confirmPassword')}</Label>
+   788→                        <div className="relative">
+   789→                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   790→                          <Input
+   791→                            type={showConfirmPassword ? 'text' : 'password'}
+   792→                            value={regConfirmPassword}
+   793→                            onChange={e => setRegConfirmPassword(e.target.value)}
+   794→                            placeholder={t('login.placeholder.confirmPassword')}
+   795→                            required
+   796→                            className="h-12 pl-10 pr-10 rounded-xl"
+   797→                          />
+   798→                          <button
+   799→                            type="button"
+   800→                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+   801→                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   802→                          >
+   803→                            {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+   804→                          </button>
+   805→                        </div>
+   806→                      </div>
+   807→
+   808→                      <Button
+   809→                        type="submit"
+   810→                        disabled={loading}
+   811→                        className="w-full h-12 btn-gradient text-white border-0 rounded-xl text-base font-semibold gap-2"
+   812→                      >
+   813→                        <span className="flex items-center gap-2">
+   814→                          {loading ? t('login.button.registering') || 'Registering...' : <>{t('login.button.register')} <ArrowRight className="w-4 h-4" /></>}
+   815→                        </span>
+   816→                      </Button>
+   817→
+   818→                      <p className="text-center text-sm text-muted-foreground">
+   819→                        {t('login.hasAccount')}{' '}
+   820→                        <button
+   821→                          type="button"
+   822→                          onClick={() => { setActiveTab('login'); setError('') }}
+   823→                          className="text-brand font-semibold hover:underline"
+   824→                        >
+   825→                          {t('login.tabs.login')}
+   826→                        </button>
+   827→                      </p>
+   828→                    </form>
+   829→                  </motion.div>
+   830→                )}
+   831→              </AnimatePresence>
+   832→            </>
+   833→          )}
+   834→        </motion.div>
+   835→      </div>
+   836→    </div>
+   837→  )
+   838→}
+   839→

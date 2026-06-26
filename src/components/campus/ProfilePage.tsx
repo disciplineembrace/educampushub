@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { User, Star, BookOpen, Heart, Settings, BadgeCheck, MapPin, GraduationCap, Mail, Phone, ArrowLeft, CreditCard, CheckCircle, Clock, XCircle, Pencil, Trash2, Loader2, MoreVertical, Eye, Crown } from 'lucide-react'
+import { User, Star, BookOpen, Heart, Settings, BadgeCheck, MapPin, GraduationCap, Mail, Phone, ArrowLeft, CreditCard, CheckCircle, Clock, XCircle, Pencil, Trash2, Loader2, MoreVertical, Eye, Crown, ShieldQuestion, ShieldCheck, AlertCircle, EyeOff, Lock } from 'lucide-react'
 import { useAppStore, formatINR, CATEGORIES, parseListingImages, type EditingListingData } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,6 +27,17 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { toast } from 'sonner'
+
+// Mirror of SECURITY_QUESTIONS from src/lib/security-question.ts
+const SECURITY_QUESTIONS = [
+  'What is your favorite book?',
+  'What was your childhood nickname?',
+  'What was the name of your first teacher?',
+  'What is your favorite movie?',
+  'What is your favorite place?',
+  'What was the name of your childhood best friend?',
+  'What is your favorite color?',
+]
 
 interface UserListing {
   id: string
@@ -68,6 +79,19 @@ export default function ProfilePage() {
   const [deletingListingId, setDeletingListingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  // ─── Security Question state ───
+  const [securityLoading, setSecurityLoading] = useState(true)
+  const [hasSecurityQuestion, setHasSecurityQuestion] = useState(false)
+  const [currentSecurityQuestion, setCurrentSecurityQuestion] = useState<string | null>(null)
+  const [securityForm, setSecurityForm] = useState({
+    currentPassword: '',
+    questionIdx: '' as number | '',
+    answer: '',
+  })
+  const [showSecurityCurrentPassword, setShowSecurityCurrentPassword] = useState(false)
+  const [securitySaving, setSecuritySaving] = useState(false)
+  const [securityError, setSecurityError] = useState('')
+
   useEffect(() => {
     if (!currentUser) return
     setEditForm({
@@ -89,7 +113,7 @@ export default function ProfilePage() {
         const allListings = listingsData.listings || []
         setMyListings(allListings)
         setWishlistListings(allListings.filter((l: UserListing & { id: string }) => wishlist.includes(l.id)))
-        
+
         if (paymentsRes.ok) {
           const paymentsData = await paymentsRes.json()
           setPayments(paymentsData.payments || [])
@@ -101,7 +125,84 @@ export default function ProfilePage() {
       }
     }
     fetchData()
+
+    // ─── Load current security question ───
+    const fetchSecurity = async () => {
+      setSecurityLoading(true)
+      try {
+        const res = await fetch('/api/auth/security-question')
+        if (!res.ok) {
+          setSecurityLoading(false)
+          return
+        }
+        const data = await res.json()
+        setHasSecurityQuestion(!!data.hasSecurityQuestion)
+        setCurrentSecurityQuestion(data.securityQuestion || null)
+      } catch {
+        // ignore
+      } finally {
+        setSecurityLoading(false)
+      }
+    }
+    fetchSecurity()
   }, [currentUser, wishlist])
+
+  // ─── Save security question ───
+  const handleSaveSecurityQuestion = async () => {
+    if (!currentUser) return
+    setSecurityError('')
+
+    if (securityForm.questionIdx === '' || securityForm.questionIdx === null) {
+      setSecurityError('Please select a security question')
+      return
+    }
+    if (!securityForm.answer.trim()) {
+      setSecurityError('Please enter an answer')
+      return
+    }
+    if (securityForm.answer.trim().length < 2) {
+      setSecurityError('Answer must be at least 2 characters')
+      return
+    }
+    if (securityForm.answer.trim().length > 100) {
+      setSecurityError('Answer must be at most 100 characters')
+      return
+    }
+    // If user already has a question set, current password is required
+    if (hasSecurityQuestion && !securityForm.currentPassword) {
+      setSecurityError('Current password is required to change your security question')
+      return
+    }
+
+    setSecuritySaving(true)
+    try {
+      const res = await fetch('/api/auth/security-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: hasSecurityQuestion ? 'update' : 'setup',
+          currentPassword: securityForm.currentPassword || undefined,
+          securityQuestionIdx: securityForm.questionIdx,
+          securityAnswer: securityForm.answer,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setSecurityError(data.error || 'Failed to save security question')
+        return
+      }
+
+      toast.success(data.message || 'Security question saved successfully')
+      setHasSecurityQuestion(true)
+      setCurrentSecurityQuestion(SECURITY_QUESTIONS[securityForm.questionIdx as number])
+      setSecurityForm({ currentPassword: '', questionIdx: '', answer: '' })
+    } catch {
+      setSecurityError('Network error. Please try again.')
+    } finally {
+      setSecuritySaving(false)
+    }
+  }
 
   const handleSaveProfile = async () => {
     if (!currentUser) return
@@ -300,6 +401,7 @@ export default function ProfilePage() {
             <TabsTrigger value="listings" className="gap-2 rounded-xl"><BookOpen className="w-4 h-4" /> My Listings</TabsTrigger>
             <TabsTrigger value="wishlist" className="gap-2 rounded-xl"><Heart className="w-4 h-4" /> Wishlist</TabsTrigger>
             <TabsTrigger value="payments" className="gap-2 rounded-xl"><CreditCard className="w-4 h-4" /> Payments</TabsTrigger>
+            <TabsTrigger value="security" className="gap-2 rounded-xl"><ShieldQuestion className="w-4 h-4" /> Security</TabsTrigger>
           </TabsList>
 
           <TabsContent value="listings">
@@ -469,6 +571,178 @@ export default function ProfilePage() {
                 })}
               </div>
             )}
+          </TabsContent>
+
+          {/* ─── Security Tab: Manage Security Question ─── */}
+          <TabsContent value="security">
+            <div className="space-y-4">
+              {/* Status card */}
+              <Card className="p-5 card-premium">
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    securityLoading
+                      ? 'bg-muted text-muted-foreground'
+                      : hasSecurityQuestion
+                        ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600'
+                        : 'bg-amber-100 dark:bg-amber-900/30 text-amber-600'
+                  }`}>
+                    {securityLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : hasSecurityQuestion ? (
+                      <ShieldCheck className="w-5 h-5" />
+                    ) : (
+                      <ShieldQuestion className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-foreground">
+                      {securityLoading
+                        ? 'Loading security status…'
+                        : hasSecurityQuestion
+                          ? 'Security question is set'
+                          : 'No security question set'}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {hasSecurityQuestion
+                        ? 'You can use it to recover your password if you forget it.'
+                        : 'Set one now to enable password recovery.'}
+                    </p>
+                    {hasSecurityQuestion && currentSecurityQuestion && (
+                      <div className="mt-3 p-3 rounded-lg bg-muted/40 border border-border">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                          Current question
+                        </p>
+                        <p className="text-sm text-foreground mt-0.5">{currentSecurityQuestion}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+
+              {/* Setup / update form */}
+              <Card className="p-5 card-premium">
+                <h3 className="text-base font-semibold text-foreground mb-1">
+                  {hasSecurityQuestion ? 'Change Security Question' : 'Set Up Security Question'}
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  {hasSecurityQuestion
+                    ? 'Enter your current password, then pick a new question and answer.'
+                    : 'Pick one of the questions below and enter your answer. You\'ll need to answer it correctly to reset your password in the future.'}
+                </p>
+
+                {securityError && (
+                  <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 text-sm flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{securityError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  {hasSecurityQuestion && (
+                    <div>
+                      <Label className="mb-1.5 block text-xs">Current Password</Label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                          type={showSecurityCurrentPassword ? 'text' : 'password'}
+                          value={securityForm.currentPassword}
+                          onChange={e => setSecurityForm(p => ({ ...p, currentPassword: e.target.value }))}
+                          placeholder="Enter your current password"
+                          className="h-11 pl-10 pr-10 rounded-xl"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSecurityCurrentPassword(!showSecurityCurrentPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {showSecurityCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        Required to verify it&apos;s really you.
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <Label className="mb-1.5 block text-xs">Security Question</Label>
+                    <Select
+                      value={securityForm.questionIdx === '' ? '' : String(securityForm.questionIdx)}
+                      onValueChange={v => setSecurityForm(p => ({ ...p, questionIdx: v === '' ? '' : Number(v) }))}
+                    >
+                      <SelectTrigger className="h-11 rounded-xl">
+                        <SelectValue placeholder="Choose a security question" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SECURITY_QUESTIONS.map((q, idx) => (
+                          <SelectItem key={idx} value={String(idx)}>
+                            {q}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="mb-1.5 block text-xs">Your Answer</Label>
+                    <div className="relative">
+                      <ShieldQuestion className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        type="text"
+                        value={securityForm.answer}
+                        onChange={e => setSecurityForm(p => ({ ...p, answer: e.target.value }))}
+                        placeholder="Enter your answer"
+                        maxLength={100}
+                        className="h-11 pl-10 rounded-xl"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1.5">
+                      Answers are stored securely (bcrypt-hashed) and never displayed to anyone, including you.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      onClick={handleSaveSecurityQuestion}
+                      disabled={securitySaving}
+                      className="btn-gradient text-white border-0 rounded-xl gap-2"
+                    >
+                      {securitySaving ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+                      ) : (
+                        <><ShieldCheck className="w-4 h-4" /> {hasSecurityQuestion ? 'Update' : 'Save'} Security Question</>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSecurityForm({ currentPassword: '', questionIdx: '', answer: '' })
+                        setSecurityError('')
+                      }}
+                      className="rounded-xl"
+                    >
+                      Reset Form
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Help card */}
+              <Card className="p-4 card-premium bg-muted/30">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    <p className="font-semibold text-foreground mb-1">Tips for choosing a good answer</p>
+                    <ul className="space-y-1 list-disc pl-4">
+                      <li>Use something only you would know — not info you post publicly on social media.</li>
+                      <li>Avoid answers that change over time (e.g., favorite movie might change next year).</li>
+                      <li>Case doesn&apos;t matter — &quot;Harry Potter&quot; and &quot;harry potter&quot; are treated as the same answer.</li>
+                      <li>After 5 wrong attempts, the recovery is temporarily locked for 15 minutes.</li>
+                    </ul>
+                  </div>
+                </div>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
