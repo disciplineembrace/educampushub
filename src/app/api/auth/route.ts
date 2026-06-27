@@ -75,6 +75,86 @@ async function createUserSession(userId: string, request: Request) {
   return token
 }
 
+// ─── GET: Return current session user (for client rehydration) ───
+export async function GET(request: Request) {
+  try {
+    const cookieStore = await import('next/headers').then(m => m.cookies())
+    const token = cookieStore.get('session_token')?.value
+    if (!token) {
+      return NextResponse.json({ user: null }, { status: 200 })
+    }
+
+    try {
+      const parts = token.split('.')
+      if (parts.length !== 3) {
+        return NextResponse.json({ user: null }, { status: 200 })
+      }
+      const [header, body, signature] = parts
+      const { createHmac, timingSafeEqual } = await import('crypto')
+      const expectedSig = createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url')
+      const sigBuf = Buffer.from(signature)
+      const expBuf = Buffer.from(expectedSig)
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        return NextResponse.json({ user: null }, { status: 200 })
+      }
+
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as {
+        userId: string
+        type: string
+        exp: number
+      }
+      if (payload.type !== 'user_session') {
+        return NextResponse.json({ user: null }, { status: 200 })
+      }
+      if (payload.exp * 1000 < Date.now()) {
+        return NextResponse.json({ user: null }, { status: 200 })
+      }
+
+      const user = await db.user.findUnique({
+        where: { id: payload.userId },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          phone: true,
+          college: true,
+          city: true,
+          avatar: true,
+          isVerified: true,
+          isAdmin: true,
+          isBanned: true,
+          rating: true,
+          totalSales: true,
+          whatsapp: true,
+          createdAt: true,
+          district: true,
+          state: true,
+          planType: true,
+          premiumActive: true,
+          premiumBookLimit: true,
+          premiumBooksUsed: true,
+          premiumExpiryDate: true,
+          mustChangePassword: true,
+        },
+      })
+
+      if (!user) {
+        return NextResponse.json({ user: null }, { status: 200 })
+      }
+      if (user.isBanned) {
+        return NextResponse.json({ error: 'This account has been banned' }, { status: 403 })
+      }
+
+      return NextResponse.json({ user }, { status: 200 })
+    } catch {
+      return NextResponse.json({ user: null }, { status: 200 })
+    }
+  } catch (error) {
+    console.error('GET /api/auth error:', error)
+    return NextResponse.json({ error: 'Failed to fetch session' }, { status: 500 })
+  }
+}
+
 export async function POST(request: Request) {
   try {
     // Rate limiting
@@ -197,7 +277,15 @@ export async function POST(request: Request) {
 
       // Find user by email
       const user = await db.user.findUnique({ where: { email: sanitizedEmail } })
+
+      // ⚠️ TIMING ATTACK MITIGATION:
+      // If the user doesn't exist, run a dummy bcrypt.compare against a fixed
+      // precomputed hash so the response time matches the "user exists, wrong
+      // password" path. Without this, attackers can enumerate registered
+      // emails by measuring response latency (bcrypt ~300-400ms vs ~0ms).
+      const DUMMY_HASH = '$2a$12$0123456789abcdefghijklmONopqrstuvwxyzABCD.EFfghijklmnopqrstuvwxyzAB'
       if (!user || !user.passwordHash) {
+        await bcrypt.compare(password, DUMMY_HASH)
         return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
       }
 

@@ -65,4 +65,9 @@ public/uploads/*
 src/generated/
 
 # Worklog
-worklog.mdtool-results/
+worklog.md
+
+# Test artifacts (should never be committed)
+tool-results/
+cookies*.txt
+/tmp/

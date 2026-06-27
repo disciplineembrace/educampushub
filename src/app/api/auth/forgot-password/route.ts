@@ -146,12 +146,17 @@ export async function POST(request: Request) {
 
       if (!user) {
         // For privacy: do NOT reveal that the email is unregistered.
-        // Return a plausible fake question so the UI behaves the same.
+        // Return a deterministic-per-email fake question so the same email
+        // always gets the same question (otherwise attackers could detect
+        // "this email is fake" by getting SECURITY_QUESTIONS[0] every time).
         recordIpFailure(ip)
+        const fakeIdx = Math.abs(
+          createHmac('sha256', RESET_SECRET).update(sanitizedEmail).digest().readInt32BE(0)
+        ) % SECURITY_QUESTIONS.length
         return NextResponse.json({
           success: true,
           message: 'Email verified. Please answer your security question.',
-          securityQuestion: SECURITY_QUESTIONS[0],
+          securityQuestion: SECURITY_QUESTIONS[fakeIdx],
           // Use a dummy email token that won't match any real user — the
           // verify_answer step will reject it. We use the supplied email
           // (already validated as well-formed) so the flow continues.
@@ -221,14 +226,14 @@ export async function POST(request: Request) {
       if (!email || typeof email !== 'string') {
         return NextResponse.json({ error: 'Email is required' }, { status: 400 })
       }
-      if (!securityAnswer || typeof securityAnswer !== 'string') {
-        // Use the generic "invalid answer" message to avoid revealing which field is wrong
-        return NextResponse.json({ error: INVALID_SECURITY_ANSWER_ERROR }, { status: 400 })
-      }
 
       const sanitizedEmail = email.toLowerCase().trim()
 
-      // Per-IP rate limit
+      // ⚠️ CRITICAL: Always check + increment the per-IP rate limit FIRST,
+      // BEFORE validating the securityAnswer field. Otherwise attackers can
+      // bypass brute-force protection by sending the wrong field name
+      // (e.g., {"answer":"x"} instead of {"securityAnswer":"x"}) — every
+      // request returns 400 but never trips the counter.
       const ipCheck = checkIpRateLimit(ip)
       if (!ipCheck.allowed) {
         const retryAfter = Math.ceil(ipCheck.retryAfterMs / 60000)
@@ -236,6 +241,13 @@ export async function POST(request: Request) {
           { error: `Too many attempts. Try again in ${retryAfter} minutes.` },
           { status: 429 }
         )
+      }
+
+      if (!securityAnswer || typeof securityAnswer !== 'string') {
+        // Use the generic "invalid answer" message to avoid revealing which field is wrong.
+        // Still count this as a failed attempt to prevent field-name-based bypass.
+        recordIpFailure(ip)
+        return NextResponse.json({ error: INVALID_SECURITY_ANSWER_ERROR }, { status: 400 })
       }
 
       const users = await sql`

@@ -59,7 +59,7 @@ export const metadata: Metadata = {
     "book exchange",
     "student community",
   ],
-  authors: [{ name: "EduCampusHub Team", url: "https://educampushub-beta.vercel.app" }],
+  authors: [{ name: "EduCampusHub Team", url: "https://educampushub.vercel.app" }],
   creator: "EduCampusHub",
   publisher: "EduCampusHub",
   formatDetection: {
@@ -67,7 +67,7 @@ export const metadata: Metadata = {
     address: false,
     telephone: false,
   },
-  metadataBase: new URL("https://educampushub-beta.vercel.app"),
+  metadataBase: new URL("https://educampushub.vercel.app"),
   alternates: {
     canonical: "/",
     languages: {
@@ -80,7 +80,7 @@ export const metadata: Metadata = {
     title: "EduCampusHub — Buy • Sell • Exchange",
     description:
       "Buy & sell old books directly with students. Save up to 70% on textbooks for NEET, JEE, UPSC & more.",
-    url: "https://educampushub-beta.vercel.app",
+    url: "https://educampushub.vercel.app",
     siteName: "EduCampusHub",
     locale: "en_IN",
     type: "website",

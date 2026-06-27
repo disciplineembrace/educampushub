@@ -3,8 +3,8 @@ export function OrganizationJsonLd() {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: 'EduCampusHub',
-    url: 'https://educampushub-beta.vercel.app',
-    logo: 'https://educampushub-beta.vercel.app/logo-512x512.webp',
+    url: 'https://educampushub.vercel.app',
+    logo: 'https://educampushub.vercel.app/logo-512x512.webp',
     description: "India's trusted student marketplace for books, notes, and study essentials. Buy, sell, and exchange textbooks directly with students.",
     sameAs: [
       'https://www.instagram.com/educampushubofficial',
@@ -29,11 +29,11 @@ export function WebSiteJsonLd() {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: 'EduCampusHub',
-    url: 'https://educampushub-beta.vercel.app',
+    url: 'https://educampushub.vercel.app',
     description: "India's trusted student marketplace for books, notes, and study essentials.",
     potentialAction: {
       '@type': 'SearchAction',
-      target: 'https://educampushub-beta.vercel.app/?search={search_term_string}',
+      target: 'https://educampushub.vercel.app/?search={search_term_string}',
       'query-input': 'required name=search_term_string',
     },
     inLanguage: ['en', 'hi', 'gu'],
@@ -47,11 +47,11 @@ export function MarketplaceJsonLd() {
     '@type': 'WebPage',
     name: 'EduCampusHub — Buy • Sell • Exchange',
     description: "India's trusted student marketplace for books, notes, and study essentials. Save up to 70% on textbooks for NEET, JEE, UPSC, and more.",
-    url: 'https://educampushub-beta.vercel.app',
+    url: 'https://educampushub.vercel.app',
     isPartOf: {
       '@type': 'WebSite',
       name: 'EduCampusHub',
-      url: 'https://educampushub-beta.vercel.app',
+      url: 'https://educampushub.vercel.app',
     },
     about: {
       '@type': 'Thing',

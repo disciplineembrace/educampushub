@@ -4,9 +4,9 @@ import { createHmac, randomUUID } from 'crypto'
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || ''
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || ''
-const REDIRECT_URI = `${process.env.NEXT_PUBLIC_APP_URL || 'https://educampushub-beta.vercel.app'}/api/auth/google/callback`
+const REDIRECT_URI = `${process.env.NEXT_PUBLIC_APP_URL || 'https://educampushub.vercel.app'}/api/auth/google/callback`
 const JWT_SECRET = process.env.JWT_SECRET || 'educampushub-insecure-dev-secret-change-me'
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://educampushub-beta.vercel.app'
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://educampushub.vercel.app'
 
 // Create a signed JWT token (same as /api/auth)
 function createSignedToken(userId: string): string {

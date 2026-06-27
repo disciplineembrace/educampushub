@@ -45,7 +45,45 @@ export async function GET(request: Request) {
   }
 
   if (type === 'users') {
-    const users = await db.user.findMany({ include: { _count: { select: { listings: true } } }, orderBy: { createdAt: 'desc' } })
+    // ⚠️ SECURITY: explicitly select columns — never use `include` without `select`
+    // because that returns ALL User columns including passwordHash and securityAnswerHash.
+    const users = await db.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        phone: true,
+        college: true,
+        city: true,
+        avatar: true,
+        isVerified: true,
+        isAdmin: true,
+        isBanned: true,
+        rating: true,
+        totalSales: true,
+        whatsapp: true,
+        createdAt: true,
+        updatedAt: true,
+        district: true,
+        state: true,
+        planType: true,
+        premiumActive: true,
+        premiumBookLimit: true,
+        premiumBooksUsed: true,
+        premiumExpiryDate: true,
+        premiumPurchaseDate: true,
+        totalBooksUploaded: true,
+        freeUploadUsed: true,
+        paidUploadCredits: true,
+        adminRole: true,
+        isSuperAdmin: true,
+        // Deliberately EXCLUDE: passwordHash, securityAnswerHash, securityAttempts,
+        // securityLockedUntil, securityUpdatedAt, mustChangePassword, twoFactorEnabled
+        // — never leak these to the admin UI
+        _count: { select: { listings: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
     return NextResponse.json({ users })
   }
 
@@ -73,9 +111,40 @@ export async function GET(request: Request) {
   if (type === 'user-detail') {
     const userId = searchParams.get('id')
     if (!userId) return NextResponse.json({ error: 'Missing user id' }, { status: 400 })
+    // ⚠️ SECURITY: use `select` (not `include`) at the top level so we don't
+    // accidentally leak passwordHash / securityAnswerHash to the admin UI.
     const user = await db.user.findUnique({
       where: { id: userId },
-      include: {
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        phone: true,
+        college: true,
+        city: true,
+        avatar: true,
+        isVerified: true,
+        isAdmin: true,
+        isBanned: true,
+        rating: true,
+        totalSales: true,
+        whatsapp: true,
+        createdAt: true,
+        updatedAt: true,
+        district: true,
+        state: true,
+        planType: true,
+        premiumActive: true,
+        premiumBookLimit: true,
+        premiumBooksUsed: true,
+        premiumExpiryDate: true,
+        premiumPurchaseDate: true,
+        totalBooksUploaded: true,
+        freeUploadUsed: true,
+        paidUploadCredits: true,
+        adminRole: true,
+        isSuperAdmin: true,
+        // Deliberately EXCLUDE sensitive columns
         listings: {
           select: { id: true, title: true, sellingPrice: true, isSold: true, isFeatured: true, isVerified: true, isUrgent: true, isDigital: true, uploadType: true, category: true, state: true, district: true, createdAt: true },
           orderBy: { createdAt: 'desc' },

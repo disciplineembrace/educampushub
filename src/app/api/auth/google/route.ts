@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || ''
-const REDIRECT_URI = `${process.env.NEXT_PUBLIC_APP_URL || 'https://educampushub-beta.vercel.app'}/api/auth/google/callback`
+const REDIRECT_URI = `${process.env.NEXT_PUBLIC_APP_URL || 'https://educampushub.vercel.app'}/api/auth/google/callback`
 
 const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
