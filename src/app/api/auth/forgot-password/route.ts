@@ -19,6 +19,7 @@ import {
   SECURITY_LOCKOUT_MS,
   INVALID_SECURITY_ANSWER_ERROR,
 } from '@/lib/security-question'
+import { checkDistributedRateLimit, incrementDistributedRateLimit, clearDistributedRateLimit } from '@/lib/distributed-rate-limit'
 
 // ─── Rate Limiting for forgot-password endpoint ───
 // NOTE: In-memory rate limiting is imperfect in serverless (resets on cold starts),
@@ -125,12 +126,14 @@ export async function POST(request: Request) {
 
       const sanitizedEmail = email.toLowerCase().trim()
 
-      // Per-IP rate limit (prevents enumeration)
-      const ipCheck = checkIpRateLimit(ip)
+      // Per-IP rate limit (prevents enumeration). Uses DB-backed limiter so
+      // it persists across Vercel cold starts.
+      const rateLimitKey = `forgot-pwd:email:${ip}`
+      const ipCheck = await checkDistributedRateLimit(rateLimitKey, MAX_FORGOT_ATTEMPTS, FORGOT_LOCKOUT_MS)
       if (!ipCheck.allowed) {
         const retryAfter = Math.ceil(ipCheck.retryAfterMs / 60000)
         return NextResponse.json(
-          { error: `Too many attempts. Try again in ${retryAfter} minutes.` },
+          { error: `Too many attempts. Try again in ${retryAfter} minute(s).` },
           { status: 429 }
         )
       }
@@ -149,6 +152,7 @@ export async function POST(request: Request) {
         // Return a deterministic-per-email fake question so the same email
         // always gets the same question (otherwise attackers could detect
         // "this email is fake" by getting SECURITY_QUESTIONS[0] every time).
+        await incrementDistributedRateLimit(rateLimitKey, FORGOT_LOCKOUT_MS)
         recordIpFailure(ip)
         const fakeIdx = Math.abs(
           createHmac('sha256', RESET_SECRET).update(sanitizedEmail).digest().readInt32BE(0)
@@ -234,11 +238,16 @@ export async function POST(request: Request) {
       // bypass brute-force protection by sending the wrong field name
       // (e.g., {"answer":"x"} instead of {"securityAnswer":"x"}) — every
       // request returns 400 but never trips the counter.
-      const ipCheck = checkIpRateLimit(ip)
+      //
+      // We use a DB-backed rate limiter (Postgres) because in-memory Maps
+      // reset on every Vercel cold start, making them trivially bypassable
+      // by sending requests fast enough to hit different instances.
+      const rateLimitKey = `forgot-pwd:verify:${ip}`
+      const ipCheck = await checkDistributedRateLimit(rateLimitKey, MAX_FORGOT_ATTEMPTS, FORGOT_LOCKOUT_MS)
       if (!ipCheck.allowed) {
         const retryAfter = Math.ceil(ipCheck.retryAfterMs / 60000)
         return NextResponse.json(
-          { error: `Too many attempts. Try again in ${retryAfter} minutes.` },
+          { error: `Too many attempts. Try again in ${retryAfter} minute(s).` },
           { status: 429 }
         )
       }
@@ -246,7 +255,7 @@ export async function POST(request: Request) {
       if (!securityAnswer || typeof securityAnswer !== 'string') {
         // Use the generic "invalid answer" message to avoid revealing which field is wrong.
         // Still count this as a failed attempt to prevent field-name-based bypass.
-        recordIpFailure(ip)
+        await incrementDistributedRateLimit(rateLimitKey, FORGOT_LOCKOUT_MS)
         return NextResponse.json({ error: INVALID_SECURITY_ANSWER_ERROR }, { status: 400 })
       }
 
@@ -260,7 +269,7 @@ export async function POST(request: Request) {
 
       // Unknown email — return generic error (no enumeration leak)
       if (!user || !user.securityAnswerHash || user.securityQuestionIdx === null) {
-        recordIpFailure(ip)
+        await incrementDistributedRateLimit(rateLimitKey, FORGOT_LOCKOUT_MS)
         return NextResponse.json({ error: INVALID_SECURITY_ANSWER_ERROR }, { status: 400 })
       }
 
@@ -302,9 +311,9 @@ export async function POST(request: Request) {
       const answerValid = await verifySecurityAnswer(securityAnswer, user.securityAnswerHash)
 
       if (!answerValid) {
-        // Record failure in memory
+        // Record failure in memory (best-effort, instance-local)
         const memResult = recordInMemoryFailure(sanitizedEmail)
-        // Record failure in DB (durable across cold starts)
+        // Record failure in DB user row (durable across cold starts, per-user)
         const newAttempts = (user.securityAttempts || 0) + 1
         const shouldLock = newAttempts >= MAX_SECURITY_ATTEMPTS
         const lockedUntil = shouldLock ? new Date(Date.now() + SECURITY_LOCKOUT_MS) : null
@@ -322,9 +331,12 @@ export async function POST(request: Request) {
           console.error('Failed to persist security attempt counter:', dbErr)
         }
 
+        // Also increment the per-IP rate limit (catches attackers hitting
+        // many different email addresses from the same IP)
+        const newIpCount = await incrementDistributedRateLimit(rateLimitKey, FORGOT_LOCKOUT_MS)
         recordIpFailure(ip)
 
-        if (shouldLock || memResult.locked) {
+        if (shouldLock || memResult.locked || newIpCount >= MAX_FORGOT_ATTEMPTS) {
           return NextResponse.json(
             {
               error: `Too many incorrect attempts. For security, this account is locked for ${formatLockoutRemaining(SECURITY_LOCKOUT_MS)}.`,
@@ -335,7 +347,10 @@ export async function POST(request: Request) {
           )
         }
 
-        const remainingAttempts = MAX_SECURITY_ATTEMPTS - newAttempts
+        const remainingAttempts = Math.min(
+          MAX_SECURITY_ATTEMPTS - newAttempts,
+          MAX_FORGOT_ATTEMPTS - newIpCount
+        )
         return NextResponse.json(
           {
             error: INVALID_SECURITY_ANSWER_ERROR,
@@ -346,8 +361,9 @@ export async function POST(request: Request) {
       }
 
       // ─── Answer verified successfully ───
-      // Clear attempt counters (both in-memory and DB)
+      // Clear attempt counters (in-memory, per-user DB row, AND per-IP DB row)
       clearInMemoryAttempts(sanitizedEmail)
+      await clearDistributedRateLimit(rateLimitKey)
       try {
         await sql`
           UPDATE "User"
