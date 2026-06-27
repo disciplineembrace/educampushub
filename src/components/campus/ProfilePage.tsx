@@ -131,6 +131,12 @@ export default function ProfilePage() {
       setSecurityLoading(true)
       try {
         const res = await fetch('/api/auth/security-question')
+        if (res.status === 401) {
+          // Session expired — send user back to login so they can re-authenticate
+          // before trying to view/edit their security question.
+          window.location.href = '/login?redirect=/profile&reason=session_expired'
+          return
+        }
         if (!res.ok) {
           setSecurityLoading(false)
           return
@@ -186,9 +192,18 @@ export default function ProfilePage() {
           securityAnswer: securityForm.answer,
         }),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
+        // 401 means the session is invalid/expired — give a clearer hint
+        if (res.status === 401) {
+          setSecurityError('Your session has expired. Please log in again to set your security question.')
+          // Optionally redirect to login after a short delay
+          setTimeout(() => {
+            window.location.href = '/login?redirect=/profile'
+          }, 2000)
+          return
+        }
         setSecurityError(data.error || 'Failed to save security question')
         return
       }

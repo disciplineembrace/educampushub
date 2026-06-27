@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless'
 
-const databaseUrl = 'postgresql://neondb_owner:npg_3gplhuJ5Fxre@ep-shy-king-aox8a8db-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+const databaseUrl = 'process.env.DATABASE_URL'
 
 const sql = neon(databaseUrl)
 

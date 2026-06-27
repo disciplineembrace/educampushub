@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless'
 
-const sql = neon('postgresql://neondb_owner:npg_3gplhuJ5Fxre@ep-shy-king-aox8a8db-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
+const sql = neon('process.env.DATABASE_URL')
 
 // Check if RateLimit table exists
 const tables = await sql`
