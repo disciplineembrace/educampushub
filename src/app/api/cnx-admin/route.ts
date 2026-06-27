@@ -359,12 +359,16 @@ export async function POST(request: Request) {
       }
       case 'delete_user_summary': {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        // ⚠️ Self-delete prevention: backend enforces this here too
+        if (targetId === admin.userId) {
+          return NextResponse.json({ error: 'You cannot delete your own admin account' }, { status: 400 })
+        }
         const summaryUser = await db.user.findUnique({
           where: { id: targetId },
           include: {
             listings: { select: { id: true, title: true, sellingPrice: true, isSold: true, isFeatured: true, uploadType: true, category: true, images: true } },
             payments: { select: { id: true, amount: true, paymentType: true, status: true } },
-            _count: { select: { listings: true, wishlistItems: true, reports: true, payments: true, adminSessions: true, auditLogs: true } },
+            _count: { select: { listings: true, wishlistItems: true, reports: true, payments: true, adminSessions: true, auditLogs: true, sessions: true } },
           },
         })
         if (!summaryUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -384,31 +388,42 @@ export async function POST(request: Request) {
         const wishlistsOnUserListings = await db.wishlist.count({ where: { listing: { sellerId: targetId } } })
         const verifiedPayments = summaryUser.payments.filter(p => p.status === 'verified')
         const totalSpent = verifiedPayments.reduce((sum, p) => sum + p.amount, 0)
+        // totalSpent is a float — guard against NaN
+        const safeTotalSpent = Number.isFinite(totalSpent) ? totalSpent : 0
         return NextResponse.json({
           user: { id: summaryUser.id, name: summaryUser.name, email: summaryUser.email, college: summaryUser.college, phone: summaryUser.phone, state: summaryUser.state, district: summaryUser.district, planType: summaryUser.planType, premiumActive: summaryUser.premiumActive, isVerified: summaryUser.isVerified, isAdmin: summaryUser.isAdmin, adminRole: summaryUser.adminRole, createdAt: summaryUser.createdAt },
           resources: {
-            listings: summaryUser._count.listings,
+            listings: summaryUser._count.listings || 0,
             activeListings: summaryUser.listings.filter(l => !l.isSold).length,
             soldListings: summaryUser.listings.filter(l => l.isSold).length,
             premiumListings: summaryUser.listings.filter(l => l.uploadType === 'premium').length,
             featuredListings: summaryUser.listings.filter(l => l.isFeatured).length,
             totalViews: totalViewsFromListings._sum.views || 0,
             totalSaves: totalSavesFromListings._sum.saves || 0,
-            totalSpentOnPlatform: totalSpent,
-            payments: summaryUser._count.payments,
-            verifiedPayments: verifiedPayments.length,
-            wishlistItems: summaryUser._count.wishlistItems,
-            reportsFiled: summaryUser._count.reports,
-            reportsOnListings: reportsOnUserListings,
-            wishlistsOnUserListings,
-            sessions: summaryUser._count.adminSessions,
-            auditLogs: summaryUser._count.auditLogs,
+            totalSpentOnPlatform: safeTotalSpent,
+            payments: summaryUser._count.payments || 0,
+            verifiedPayments: verifiedPayments.length || 0,
+            wishlistItems: summaryUser._count.wishlistItems || 0,
+            reportsFiled: summaryUser._count.reports || 0,
+            reportsOnListings: reportsOnUserListings || 0,
+            wishlistsOnListings: wishlistsOnUserListings || 0,
+            sessions: summaryUser._count.adminSessions || 0,
+            userSessions: summaryUser._count.sessions || 0,
+            auditLogs: summaryUser._count.auditLogs || 0,
           },
           listingTitles: summaryUser.listings.slice(0, 10).map(l => ({ id: l.id, title: l.title, price: l.sellingPrice, category: l.category })),
         })
       }
       case 'delete_user': {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        // Validate userId — must be a non-empty string
+        if (!targetId || typeof targetId !== 'string' || targetId.trim() === '') {
+          return NextResponse.json({ error: 'Invalid user id' }, { status: 400 })
+        }
+        // ⚠️ SECURITY: prevent admins from deleting their own account
+        if (targetId === admin.userId) {
+          return NextResponse.json({ error: 'You cannot delete your own admin account' }, { status: 400 })
+        }
         const targetUser = await db.user.findUnique({ where: { id: targetId } })
         if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
         // Super Admin accounts CANNOT be deleted
@@ -418,26 +433,126 @@ export async function POST(request: Request) {
         if (targetUser.isAdmin && !canManageAdmins(admin.role as AdminRole, admin.isSuperAdmin)) {
           return NextResponse.json({ error: 'Only Super Admin can delete admin accounts' }, { status: 403 })
         }
-        // Create audit log BEFORE deleting the user
-        await db.auditLog.create({ data: { actorId: admin.userId, action: 'delete_user', targetType: 'user', targetId, ipAddress: ip, details: JSON.stringify({ name: targetUser.name, email: targetUser.email, isAdmin: targetUser.isAdmin, adminRole: targetUser.adminRole }) } })
-        // Delete user's listings and their related data
-        const userListings = await db.listing.findMany({ where: { sellerId: targetId }, select: { id: true } })
-        const listingIds = userListings.map(l => l.id)
-        if (listingIds.length > 0) {
-          await db.wishlist.deleteMany({ where: { listingId: { in: listingIds } } })
-          await db.report.deleteMany({ where: { listingId: { in: listingIds } } })
-          await db.listing.deleteMany({ where: { id: { in: listingIds } } })
+
+        // ─── Cascade delete in a single transaction ───
+        // Order matters: child rows first, parent rows last.
+        // 1. Listings owned by user → must first delete Wishlists & Reports that reference those listings
+        // 2. User's own Wishlists (saved items)
+        // 3. Reports filed BY the user (as reporter)
+        // 4. AdminSessions (admin login sessions for this user)
+        // 5. UserSessions (regular login sessions — was MISSING before this fix)
+        // 6. Payments
+        // 7. AuditLogs where this user is the TARGET (historical audit of actions on this user)
+        //    NOTE: AuditLogs where this user is the ACTOR are preserved (so we retain "admin X deleted user Y" trail)
+        // 8. Finally, the User row itself
+        const breakdown = await db.$transaction(async (tx) => {
+          // Find all listings owned by the user
+          const userListings = await tx.listing.findMany({
+            where: { sellerId: targetId },
+            select: { id: true },
+          })
+          const listingIds = userListings.map((l) => l.id)
+
+          // Delete wishlists & reports that reference user's listings
+          let wishlistsOnListings = 0
+          let reportsOnListings = 0
+          if (listingIds.length > 0) {
+            wishlistsOnListings = await tx.wishlist.deleteMany({ where: { listingId: { in: listingIds } } }).then((r) => r.count)
+            reportsOnListings = await tx.report.deleteMany({ where: { listingId: { in: listingIds } } }).then((r) => r.count)
+            await tx.listing.deleteMany({ where: { id: { in: listingIds } } })
+          }
+
+          // Delete user's own wishlist items (saved by user)
+          const wishlistItems = await tx.wishlist.deleteMany({ where: { userId: targetId } }).then((r) => r.count)
+          // Delete reports filed by user
+          const reportsFiled = await tx.report.deleteMany({ where: { reporterId: targetId } }).then((r) => r.count)
+          // Delete admin sessions
+          const adminSessions = await tx.adminSession.deleteMany({ where: { userId: targetId } }).then((r) => r.count)
+          // Delete regular user sessions (was MISSING in previous implementation)
+          const userSessions = await tx.userSession.deleteMany({ where: { userId: targetId } }).then((r) => r.count)
+          // Delete payments
+          const payments = await tx.payment.deleteMany({ where: { userId: targetId } }).then((r) => r.count)
+          // Delete audit logs that TARGET this user (preserve actor logs for historical trail)
+          const targetAuditLogs = await tx.auditLog.deleteMany({ where: { targetId, targetType: 'user' } }).then((r) => r.count)
+
+          // Finally delete the user
+          await tx.user.delete({ where: { id: targetId } })
+
+          return {
+            uploads: 0, // currently no separate uploads table; uploads are tracked as Listing rows with uploadType
+            books: listingIds.length, // listings = books/uploads in this app's domain
+            payments,
+            listings: listingIds.length,
+            reviews: 0, // no separate reviews table in current schema
+            sales: targetUser.totalSales || 0, // historical sales counter from user record
+            wishlistItems,
+            reportsFiled,
+            reportsOnListings,
+            wishlistsOnListings,
+            adminSessions,
+            userSessions,
+            targetAuditLogs,
+          }
+        })
+
+        // Record audit log AFTER successful deletion (actor = admin, target = deleted user id)
+        // We use a separate db call (outside the transaction) so the audit row commits even
+        // if the audit insert itself fails.
+        try {
+          await db.auditLog.create({
+            data: {
+              actorId: admin.userId,
+              action: 'delete_user',
+              targetType: 'user',
+              targetId,
+              ipAddress: ip,
+              details: JSON.stringify({
+                name: targetUser.name,
+                email: targetUser.email,
+                isAdmin: targetUser.isAdmin,
+                adminRole: targetUser.adminRole,
+                affectedRecords:
+                  breakdown.listings +
+                  breakdown.payments +
+                  breakdown.wishlistItems +
+                  breakdown.reportsFiled +
+                  breakdown.reportsOnListings +
+                  breakdown.wishlistsOnListings +
+                  breakdown.adminSessions +
+                  breakdown.userSessions +
+                  breakdown.targetAuditLogs,
+                breakdown,
+              }),
+            },
+          })
+        } catch {
+          // Audit log failure is non-fatal — the deletion already succeeded
         }
-        // Delete other user data
-        await db.wishlist.deleteMany({ where: { userId: targetId } })
-        await db.report.deleteMany({ where: { reporterId: targetId } })
-        await db.adminSession.deleteMany({ where: { userId: targetId } })
-        await db.payment.deleteMany({ where: { userId: targetId } })
-        // Delete audit logs that reference this user as target
-        await db.auditLog.deleteMany({ where: { targetId, targetType: 'user' } })
-        // Finally delete the user
-        await db.user.delete({ where: { id: targetId } })
-        return NextResponse.json({ success: true })
+
+        const affectedRecords =
+          breakdown.listings +
+          breakdown.payments +
+          breakdown.wishlistItems +
+          breakdown.reportsFiled +
+          breakdown.reportsOnListings +
+          breakdown.wishlistsOnListings +
+          breakdown.adminSessions +
+          breakdown.userSessions +
+          breakdown.targetAuditLogs
+
+        return NextResponse.json({
+          success: true,
+          deletedUserId: targetId,
+          affectedRecords,
+          breakdown: {
+            uploads: breakdown.uploads,
+            books: breakdown.books,
+            payments: breakdown.payments,
+            listings: breakdown.listings,
+            reviews: breakdown.reviews,
+            sales: breakdown.sales,
+          },
+        })
       }
       case 'delete_user_listings': {
         if (!hasPermission(admin.role as AdminRole, 'all')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

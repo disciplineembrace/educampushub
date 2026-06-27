@@ -136,6 +136,7 @@ interface DeleteSummary {
     reportsOnListings: number
     wishlistsOnListings: number
     sessions: number
+    userSessions?: number
     auditLogs: number
   }
   listingTitles: { id: string; title: string; price: number; category: string }[]
@@ -668,6 +669,11 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
 
   // Fetch delete user summary before confirming deletion
   const fetchDeleteSummary = async (userId: string) => {
+    // ⚠️ Self-delete prevention — never even fetch the summary for own account
+    if (admin && userId === admin.id) {
+      toast.error('You cannot delete your own admin account')
+      return
+    }
     setDeleteSummaryLoading(true)
     setDeleteSummary(null)
     try {
@@ -676,16 +682,57 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete_user_summary', targetId: userId }),
       })
-      if (res.ok) {
-        const data = await res.json()
-        setDeleteSummary(data)
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.user) {
+        // ─── Sanitize: ensure all resource counts are valid numbers (NaN-safe) ───
+        // Backend should already return numbers, but defensive coercion protects
+        // against any future field additions or partial responses.
+        const num = (v: unknown): number => {
+          const n = typeof v === 'number' ? v : Number(v)
+          return Number.isFinite(n) ? n : 0
+        }
+        const sanitized: DeleteSummary = {
+          user: {
+            id: data.user.id,
+            name: data.user.name || '—',
+            email: data.user.email || '—',
+            college: data.user.college ?? null,
+            phone: data.user.phone ?? null,
+            state: data.user.state || '',
+            district: data.user.district || '',
+            planType: data.user.planType || 'normal',
+            premiumActive: !!data.user.premiumActive,
+            isVerified: !!data.user.isVerified,
+            createdAt: data.user.createdAt || new Date(0).toISOString(),
+          },
+          resources: {
+            listings: num(data.resources?.listings),
+            activeListings: num(data.resources?.activeListings),
+            soldListings: num(data.resources?.soldListings),
+            premiumListings: num(data.resources?.premiumListings),
+            featuredListings: num(data.resources?.featuredListings),
+            totalViews: num(data.resources?.totalViews),
+            totalSaves: num(data.resources?.totalSaves),
+            totalSpentOnPlatform: num(data.resources?.totalSpentOnPlatform),
+            payments: num(data.resources?.payments),
+            verifiedPayments: num(data.resources?.verifiedPayments),
+            wishlistItems: num(data.resources?.wishlistItems),
+            reportsFiled: num(data.resources?.reportsFiled),
+            reportsOnListings: num(data.resources?.reportsOnListings),
+            wishlistsOnListings: num(data.resources?.wishlistsOnListings),
+            sessions: num(data.resources?.sessions),
+            userSessions: num(data.resources?.userSessions),
+            auditLogs: num(data.resources?.auditLogs),
+          },
+          listingTitles: Array.isArray(data.listingTitles) ? data.listingTitles : [],
+        }
+        setDeleteSummary(sanitized)
         setShowDeleteConfirm(true)
       } else {
-        const data = await res.json()
         toast.error(data.error || 'Failed to load delete summary')
       }
     } catch {
-      toast.error('Failed to load delete summary')
+      toast.error('Failed to load delete summary — check your connection')
     } finally {
       setDeleteSummaryLoading(false)
     }
@@ -693,6 +740,13 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
 
   // Confirm and execute user deletion
   const confirmDeleteUser = async (userId: string) => {
+    // ⚠️ Double-click prevention: if already deleting, bail out immediately
+    if (deletingUser) return
+    // ⚠️ Self-delete prevention (defense in depth — backend also enforces this)
+    if (admin && userId === admin.id) {
+      toast.error('You cannot delete your own admin account')
+      return
+    }
     setDeletingUser(true)
     try {
       const res = await fetch('/api/cnx-admin', {
@@ -700,20 +754,50 @@ export default function AdminClient({ admin: initialAdmin }: { admin: AdminInfo 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete_user', targetId: userId }),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (res.ok) {
-        toast.success('User account permanently deleted')
+        // Use breakdown info in success message if available
+        const affected = typeof data.affectedRecords === 'number' ? data.affectedRecords : 0
+        const bd = data.breakdown || {}
+        const parts: string[] = []
+        if (bd.listings) parts.push(`${bd.listings} listing${bd.listings > 1 ? 's' : ''}`)
+        if (bd.payments) parts.push(`${bd.payments} payment${bd.payments > 1 ? 's' : ''}`)
+        if (bd.books) parts.push(`${bd.books} book${bd.books > 1 ? 's' : ''}`)
+        const detail = parts.length > 0 ? ` (${parts.join(', ')} removed)` : ''
+        toast.success(`User permanently deleted${affected > 0 ? ` · ${affected} record${affected > 1 ? 's' : ''} cleaned up${detail}` : ''}`)
+        // Close modals + clear state
         setShowDeleteConfirm(false)
         setShowUserModal(false)
         setSelectedUser(null)
         setUserDetail(null)
         setDeleteSummary(null)
+        // Refresh all data so user list / stats / payments reflect the deletion
         fetchData()
+        if (activeTab === 'payments') fetchPayments()
+        if (activeTab === 'audit') fetchAuditLogs()
       } else {
-        toast.error(data.error || 'Delete failed')
+        // Distinguish common errors for clearer feedback
+        if (res.status === 400) {
+          toast.error(data.error || 'Invalid request')
+        } else if (res.status === 403) {
+          toast.error(data.error || 'You do not have permission to delete this user')
+        } else if (res.status === 404) {
+          toast.error(data.error || 'User not found (may have already been deleted)')
+          // Close modals because the user no longer exists
+          setShowDeleteConfirm(false)
+          setShowUserModal(false)
+          setSelectedUser(null)
+          setUserDetail(null)
+          setDeleteSummary(null)
+          fetchData()
+        } else if (res.status === 401) {
+          toast.error('Your admin session has expired. Please log in again.')
+        } else {
+          toast.error(data.error || `Delete failed (HTTP ${res.status})`)
+        }
       }
     } catch {
-      toast.error('Network error during deletion')
+      toast.error('Network error during deletion — check your connection and try again')
     } finally {
       setDeletingUser(false)
     }
@@ -1838,89 +1922,173 @@ function DeleteUserConfirmModal({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const r = summary.resources
-  const totalAffected = r.listings + r.payments + r.wishlistItems + r.reportsFiled + r.wishlistsOnListings + r.reportsOnListings + r.sessions
+  // ─── NaN FIX: coerce every count to a valid number (default 0) ───
+  // The backend may legitimately return undefined/null for some fields
+  // (e.g. when no listings exist), which would cause `+` to produce NaN
+  // and "Total affected records: NaN" to render in the modal.
+  const num = (v: unknown): number => {
+    const n = typeof v === 'number' ? v : Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  const r = {
+    listings: num(summary.resources?.listings),
+    activeListings: num(summary.resources?.activeListings),
+    soldListings: num(summary.resources?.soldListings),
+    premiumListings: num(summary.resources?.premiumListings),
+    featuredListings: num(summary.resources?.featuredListings),
+    totalViews: num(summary.resources?.totalViews),
+    totalSaves: num(summary.resources?.totalSaves),
+    totalSpentOnPlatform: num(summary.resources?.totalSpentOnPlatform),
+    payments: num(summary.resources?.payments),
+    verifiedPayments: num(summary.resources?.verifiedPayments),
+    wishlistItems: num(summary.resources?.wishlistItems),
+    reportsFiled: num(summary.resources?.reportsFiled),
+    reportsOnListings: num(summary.resources?.reportsOnListings),
+    wishlistsOnListings: num(summary.resources?.wishlistsOnListings),
+    sessions: num(summary.resources?.sessions),
+    userSessions: num(summary.resources?.userSessions),
+    auditLogs: num(summary.resources?.auditLogs),
+  }
+  const listingTitles = summary.listingTitles || []
+  const totalAffected =
+    r.listings +
+    r.payments +
+    r.wishlistItems +
+    r.reportsFiled +
+    r.wishlistsOnListings +
+    r.reportsOnListings +
+    r.sessions +
+    r.userSessions +
+    r.auditLogs
+
+  // Mobile-friendly card data
+  const resourceCards = [
+    { label: 'Listings', value: r.listings, sub: `${r.activeListings} active, ${r.soldListings} sold` },
+    { label: 'Premium Listings', value: r.premiumListings, sub: r.featuredListings > 0 ? `${r.featuredListings} featured` : undefined },
+    { label: 'Total Views Lost', value: r.totalViews, sub: `${r.totalSaves} saves` },
+    { label: 'Payments', value: r.payments, sub: `${r.verifiedPayments} verified` },
+    { label: 'Spent on Platform', value: formatINR(r.totalSpentOnPlatform), sub: 'total verified' },
+    { label: 'Wishlist Items', value: r.wishlistItems, sub: 'saved by user' },
+    { label: 'Reports Filed', value: r.reportsFiled, sub: 'by this user' },
+    { label: 'Reports on Listings', value: r.reportsOnListings, sub: 'on their listings' },
+    { label: 'Wishlists on Listings', value: r.wishlistsOnListings, sub: 'by other users' },
+  ].filter(item => typeof item.value === 'string' || item.value > 0)
+
+  // Format joined date safely (defensive against invalid date strings)
+  const joinedDate = (() => {
+    try {
+      const d = new Date(summary.user.createdAt)
+      if (isNaN(d.getTime())) return '—'
+      return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })
+    } catch {
+      return '—'
+    }
+  })()
+
+  const locationParts = [summary.user.district, summary.user.state].filter(Boolean)
+  const locationStr = locationParts.length > 0 ? locationParts.join(', ') : '—'
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-0 sm:p-4"
       onClick={onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-user-title"
     >
       <motion.div
         initial={{ scale: 0.95, y: 20 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.95, y: 20 }}
-        className="w-full max-w-2xl bg-slate-900 border border-red-500/30 rounded-2xl"
+        // Mobile: full-width sheet anchored to bottom; Desktop: centered modal max-w-2xl
+        className="w-full max-w-2xl max-h-[100vh] sm:max-h-[90vh] bg-slate-900 border border-red-500/30 rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-5 border-b border-slate-800">
+        <div className="p-4 sm:p-5 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center shrink-0">
               <UserX className="w-5 h-5 text-red-400" />
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-red-400">Permanently Delete User Account</h2>
+            <div className="min-w-0 flex-1">
+              <h2 id="delete-user-title" className="text-base sm:text-lg font-bold text-red-400 truncate">
+                Permanently Delete User Account
+              </h2>
               <p className="text-xs text-slate-500">This action is IRREVERSIBLE. Review the data that will be destroyed.</p>
             </div>
           </div>
         </div>
 
-        {/* User Info */}
-        <div className="p-5 space-y-4 max-h-[calc(80vh-180px)] overflow-y-auto custom-scrollbar">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+        {/* Scrollable Body */}
+        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+          {/* Account Details */}
+          <div className="bg-slate-800/50 rounded-xl p-3 sm:p-4 border border-slate-700/50">
             <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Account Details</p>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div><span className="text-slate-500">Name:</span> <span className="text-slate-200 font-medium">{summary.user.name}</span></div>
-              <div><span className="text-slate-500">Email:</span> <span className="text-slate-200">{summary.user.email}</span></div>
-              <div><span className="text-slate-500">Phone:</span> <span className="text-slate-200">{summary.user.phone || '—'}</span></div>
-              <div><span className="text-slate-500">College:</span> <span className="text-slate-200">{summary.user.college || '—'}</span></div>
-              <div><span className="text-slate-500">Location:</span> <span className="text-slate-200">{summary.user.district}{summary.user.state ? `, ${summary.user.state}` : ''}</span></div>
-              <div><span className="text-slate-500">Joined:</span> <span className="text-slate-200">{new Date(summary.user.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}</span></div>
+            {/* Mobile: 1 column; sm+: 2 columns */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
+              <div className="flex justify-between sm:block">
+                <span className="text-slate-500">Name:</span>{' '}
+                <span className="text-slate-200 font-medium truncate">{summary.user.name || '—'}</span>
+              </div>
+              <div className="flex justify-between sm:block min-w-0">
+                <span className="text-slate-500">Email:</span>{' '}
+                <span className="text-slate-200 truncate inline-block max-w-full align-bottom">{summary.user.email || '—'}</span>
+              </div>
+              <div className="flex justify-between sm:block">
+                <span className="text-slate-500">Phone:</span>{' '}
+                <span className="text-slate-200">{summary.user.phone || '—'}</span>
+              </div>
+              <div className="flex justify-between sm:block">
+                <span className="text-slate-500">College:</span>{' '}
+                <span className="text-slate-200 truncate">{summary.user.college || '—'}</span>
+              </div>
+              <div className="flex justify-between sm:block">
+                <span className="text-slate-500">Location:</span>{' '}
+                <span className="text-slate-200">{locationStr}</span>
+              </div>
+              <div className="flex justify-between sm:block">
+                <span className="text-slate-500">Joined:</span>{' '}
+                <span className="text-slate-200">{joinedDate}</span>
+              </div>
             </div>
           </div>
 
           {/* Resources Affected */}
-          <div className="bg-red-500/5 rounded-xl p-4 border border-red-500/20">
+          <div className="bg-red-500/5 rounded-xl p-3 sm:p-4 border border-red-500/20">
             <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
               <p className="text-sm font-semibold text-red-400">Resources That Will Be Destroyed</p>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {[
-                { label: 'Listings', value: r.listings, sub: `${r.activeListings} active, ${r.soldListings} sold` },
-                { label: 'Premium Listings', value: r.premiumListings, sub: r.featuredListings > 0 ? `${r.featuredListings} featured` : undefined },
-                { label: 'Total Views Lost', value: r.totalViews, sub: `${r.totalSaves} saves` },
-                { label: 'Payments', value: r.payments, sub: `${r.verifiedPayments} verified` },
-                { label: 'Spent on Platform', value: formatINR(r.totalSpentOnPlatform), sub: 'total verified' },
-                { label: 'Wishlist Items', value: r.wishlistItems, sub: 'saved by user' },
-                { label: 'Reports Filed', value: r.reportsFiled, sub: 'by this user' },
-                { label: 'Reports on Listings', value: r.reportsOnListings, sub: 'on their listings' },
-                { label: 'Wishlists on Listings', value: r.wishlistsOnListings, sub: 'by other users' },
-              ].filter(item => typeof item.value === 'string' || item.value > 0).map(item => (
-                <div key={item.label} className="bg-slate-800/50 rounded-lg p-2.5">
-                  <p className="text-sm font-bold text-slate-200">{item.value}</p>
-                  <p className="text-[10px] text-slate-500">{item.label}</p>
-                  {item.sub && <p className="text-[9px] text-slate-600 mt-0.5">{item.sub}</p>}
+            {/* Mobile: 2 columns; sm+: 3 columns */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+              {resourceCards.length === 0 ? (
+                <div className="col-span-full text-xs text-slate-500 italic py-2">
+                  No related resources — only the user account will be deleted.
+                </div>
+              ) : resourceCards.map(item => (
+                <div key={item.label} className="bg-slate-800/50 rounded-lg p-2 sm:p-2.5">
+                  <p className="text-sm font-bold text-slate-200 break-words">{item.value}</p>
+                  <p className="text-[10px] text-slate-500 leading-tight">{item.label}</p>
+                  {item.sub && <p className="text-[9px] text-slate-600 mt-0.5 leading-tight">{item.sub}</p>}
                 </div>
               ))}
             </div>
           </div>
 
           {/* Listing Titles That Will Be Deleted */}
-          {summary.listingTitles.length > 0 && (
-            <div className="bg-slate-800/30 rounded-xl p-4 border border-slate-700/50">
+          {listingTitles.length > 0 && (
+            <div className="bg-slate-800/30 rounded-xl p-3 sm:p-4 border border-slate-700/50">
               <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">
-                Listings to be deleted ({summary.listingTitles.length}{r.listings > 10 ? ` of ${r.listings}` : ''})
+                Listings to be deleted ({listingTitles.length}{r.listings > 10 ? ` of ${r.listings}` : ''})
               </p>
               <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
-                {summary.listingTitles.map(l => (
-                  <div key={l.id} className="flex items-center justify-between text-xs py-1">
-                    <span className="text-slate-300 truncate flex-1">{l.title}</span>
-                    <span className="text-slate-400 font-mono ml-2">{formatINR(l.price)}</span>
+                {listingTitles.map(l => (
+                  <div key={l.id} className="flex items-center justify-between text-xs py-1 gap-2">
+                    <span className="text-slate-300 truncate flex-1 min-w-0">{l.title}</span>
+                    <span className="text-slate-400 font-mono shrink-0">{formatINR(l.price)}</span>
                   </div>
                 ))}
                 {r.listings > 10 && (
@@ -1930,29 +2098,47 @@ function DeleteUserConfirmModal({
             </div>
           )}
 
+          {/* Irreversible Warning */}
+          <div className="flex items-start gap-2 bg-amber-500/5 rounded-xl p-3 border border-amber-500/20">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-amber-300">
+              <span className="font-semibold">Warning:</span> This action is{' '}
+              <span className="font-bold text-amber-200">irreversible</span>. All associated data
+              (listings, payments, wishlists, reports, sessions) will be permanently removed.
+              The user will need to register a new account to use the platform again.
+            </div>
+          </div>
+
           {/* Total Impact */}
-          <div className="flex items-center justify-between bg-red-500/10 rounded-xl p-3 border border-red-500/20">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-400" />
-              <span className="text-sm font-medium text-red-300">Total affected records: {totalAffected}</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-red-500/10 rounded-xl p-3 border border-red-500/20">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span className="text-sm font-medium text-red-300">
+                Total affected records: <span className="font-bold">{totalAffected}</span>
+              </span>
             </div>
             {summary.user.premiumActive && (
-              <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-xs rounded-full">
+              <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 border text-xs rounded-full shrink-0">
                 Premium User
               </Badge>
             )}
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-800">
-          <Button variant="ghost" onClick={onCancel} className="text-slate-400 hover:text-slate-200" disabled={deleting}>
+        {/* Footer — buttons stack on mobile, row on desktop */}
+        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 p-4 sm:p-5 border-t border-slate-800 shrink-0">
+          <Button
+            variant="ghost"
+            onClick={onCancel}
+            className="text-slate-400 hover:text-slate-200 w-full sm:w-auto"
+            disabled={deleting}
+          >
             Cancel
           </Button>
           <Button
             onClick={onConfirm}
             disabled={deleting}
-            className="bg-red-600 hover:bg-red-700 text-white gap-2"
+            className="bg-red-600 hover:bg-red-700 text-white gap-2 w-full sm:w-auto"
           >
             {deleting ? (
               <>
