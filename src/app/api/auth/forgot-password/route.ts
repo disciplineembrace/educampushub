@@ -156,7 +156,8 @@ export async function POST(request: Request) {
           // verify_answer step will reject it. We use the supplied email
           // (already validated as well-formed) so the flow continues.
           maskedEmail: sanitizedEmail,
-          emailNotFound: true, // internal flag, NOT exposed in client-readable strings
+          // Do NOT include emailNotFound in the response — it could be read
+          // from the network tab and leak whether an email is registered.
         })
       }
 
